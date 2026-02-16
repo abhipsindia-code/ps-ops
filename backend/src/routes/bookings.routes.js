@@ -1,0 +1,185 @@
+const express = require("express");
+const router = express.Router();
+
+const auth = require("../middleware/auth.middleware");
+const { allowRoles } = require("../middleware/roleMiddleware");
+const {pool} = require("../../db");
+const { createBooking } = require("../controllers/bookings.controller");
+
+
+/*
+Admin → all bookings
+Supervisor → only bookings created by them
+*/
+
+router.get("/", auth, allowRoles("admin","supervisor"), async (req,res)=>{
+  const userId = req.user.id;
+  const role = req.user.role;
+  const includeUnbooked = req.query.include_unbooked === "1";
+
+  const connection = await pool.getConnection();
+
+  try {
+
+    // 1️⃣ get bookings
+let bookingsQuery = `
+SELECT 
+  b.id,
+  b.code,
+  b.created_at,
+  b.service_type,
+  c.name as contact_name,
+  c.phone as contact_phone,
+  c.email as contact_email,
+  co.name as company_name,
+  co.code as company_code,
+  co.type as company_type
+FROM bookings b
+LEFT JOIN contacts c ON c.id = b.contact_id
+LEFT JOIN companies co ON co.id = b.company_id
+`;
+
+if (role === "supervisor") {
+  bookingsQuery += `
+  WHERE EXISTS (
+    SELECT 1 FROM jobs j
+    WHERE j.booking_id = b.id
+    AND j.supervisor_id = ?
+  )`;
+}
+
+bookingsQuery += ` ORDER BY b.created_at DESC`;
+
+const [bookings] = await connection.query(
+  bookingsQuery,
+  role === "supervisor" ? [userId] : []
+);
+
+
+    // 2️⃣ attach jobs to each booking
+    for (let booking of bookings) {
+      const [jobs] = await connection.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.sub_service,
+          j.status,
+          j.start_date,
+          c.id AS job_contact_id,
+          c.name AS job_contact_name,
+          c.phone AS job_contact_phone,
+          c.email AS job_contact_email,
+          co.name AS job_company_name,
+          co.code AS job_company_code,
+          co.type AS job_company_type
+        FROM jobs j
+        LEFT JOIN contacts c ON c.id = j.requested_by_contact_id
+        LEFT JOIN companies co ON co.id = j.company_id
+        WHERE j.booking_id = ?
+        ORDER BY j.created_at DESC`,
+        [booking.id]
+      );
+
+      booking.jobs = jobs.map(job => ({
+        id: job.id,
+        code: job.code,
+        sub_service: job.sub_service,
+        status: job.status,
+        start_date: job.start_date,
+      }));
+
+      const fallbackJob = jobs.find(job => job.job_contact_id || job.job_company_code || job.job_company_name);
+      if (fallbackJob) {
+        booking.contact_name = booking.contact_name || fallbackJob.job_contact_name || null;
+        booking.contact_phone = booking.contact_phone || fallbackJob.job_contact_phone || null;
+        booking.contact_email = booking.contact_email || fallbackJob.job_contact_email || null;
+        booking.company_name = booking.company_name || fallbackJob.job_company_name || null;
+        booking.company_code = booking.company_code || fallbackJob.job_company_code || null;
+        booking.company_type = booking.company_type || fallbackJob.job_company_type || null;
+      }
+    }
+
+    if (includeUnbooked) {
+      let unbookedWhere = "WHERE j.booking_id IS NULL";
+      let unbookedParams = [];
+
+      if (role === "supervisor") {
+        unbookedWhere += " AND j.supervisor_id = ?";
+        unbookedParams.push(userId);
+      }
+
+      const [unbookedJobs] = await connection.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.sub_service,
+          j.status,
+          j.start_date,
+          j.created_at,
+          j.requested_by_contact_id,
+          c.name AS contact_name,
+          c.phone AS contact_phone,
+          c.email AS contact_email,
+          co.name AS company_name,
+          co.code AS company_code,
+          co.type AS company_type
+        FROM jobs j
+        LEFT JOIN contacts c ON c.id = j.requested_by_contact_id
+        LEFT JOIN companies co ON co.id = j.company_id
+        ${unbookedWhere}
+        ORDER BY j.created_at DESC
+        `,
+        unbookedParams
+      );
+
+      const grouped = new Map();
+      for (const job of unbookedJobs) {
+        const contactKey = job.requested_by_contact_id || `unknown-${job.company_code || "residential"}`;
+        if (!grouped.has(contactKey)) {
+          grouped.set(contactKey, {
+            id: `UNBOOKED-${contactKey}`,
+            code: "UNBOOKED",
+            created_at: job.created_at,
+            service_type: null,
+            contact_name: job.contact_name || null,
+            contact_phone: job.contact_phone || null,
+            contact_email: job.contact_email || null,
+            company_name: job.company_name || null,
+            company_code: job.company_code || null,
+            company_type: job.company_type || null,
+            is_unbooked: true,
+            jobs: [],
+          });
+        }
+
+        const bucket = grouped.get(contactKey);
+        bucket.jobs.push({
+          id: job.id,
+          code: job.code,
+          sub_service: job.sub_service,
+          status: job.status,
+          start_date: job.start_date,
+        });
+      }
+
+      if (grouped.size > 0) {
+        bookings.push(...Array.from(grouped.values()));
+      }
+    }
+
+    res.json(bookings);
+
+  } catch(err){
+    console.error(err);
+    res.status(500).json({error:"Failed to load bookings"});
+  } finally {
+    connection.release();
+  }
+});
+
+// Create booking (optionally with recurrence)
+router.post("/", auth, allowRoles("admin"), createBooking);
+
+module.exports = router;

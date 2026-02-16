@@ -1,0 +1,303 @@
+/* =========================================================
+   ROOT + RESET
+   ========================================================= */
+
+:root{
+  --bg:#f6f7fb;
+  --panel:#ffffff;
+  --text:#1f2937;
+  --muted:#6b7280;
+  --border:#e5e7eb;
+  --primary:#0284c7;
+}
+
+*,
+*::before,
+*::after{
+  box-sizing:border-box;
+}
+
+html,body,#root{
+  height:100%;
+  margin:0;
+}
+
+body{
+  font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  overflow-x:hidden;
+}
+
+img{max-width:100%;display:block}
+
+button{
+  font-family:inherit;
+  cursor:pointer;
+  border:none;
+  border-radius:8px;
+  padding:10px 14px;
+  font-weight:600;
+}
+
+button.primary{
+  background:var(--primary);
+  color:white;
+}
+
+button:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+/* =========================================================
+   APP LAYOUT
+   ========================================================= */
+
+.app-shell{
+  height:100%;
+  display:flex;
+  flex-direction:column;
+}
+
+/* HEADER */
+
+.app-header{
+  height:64px;
+  background:white;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 16px;
+  flex-shrink:0;
+}
+
+.header-left{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.header-title{
+  font-weight:700;
+  font-size:18px;
+}
+
+/* BODY */
+
+.app-body{
+  flex:1;
+  display:flex;
+  min-height:0;   /* critical for scroll containers */
+}
+
+/* SIDEBAR (desktop) */
+
+.sidebar{
+  width:260px;
+  background:white;
+  border-right:1px solid var(--border);
+  padding:14px;
+  overflow-y:auto;
+  flex-shrink:0;
+}
+
+/* MAIN CONTENT */
+
+.main-content{
+  flex:1;
+  min-width:0;
+  overflow-y:auto;
+  padding:16px;
+  padding-bottom:90px; /* space for mobile tabbar */
+}
+
+/* =========================================================
+   JOB CARDS TEXT FIX
+   ========================================================= */
+
+.job-title{
+  font-weight:600;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media (max-width:768px){
+
+  .sidebar{
+    display:none;
+  }
+
+  .main-content{
+    padding:12px;
+    padding-bottom:90px;
+  }
+}
+
+/* =========================================================
+   MOBILE TAB BAR
+   ========================================================= */
+
+.mobile-tabbar{
+  position:fixed;
+  bottom:0;
+  left:0;
+  right:0;
+  height:64px;
+  background:white;
+  border-top:1px solid var(--border);
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  z-index:900;
+}
+
+.mobile-tabbar.two-col{
+  grid-template-columns:repeat(2,1fr);
+}
+
+.mobile-tabbar button{
+  background:none;
+  font-size:14px;
+}
+
+/* =========================================================
+   FULLSCREEN PANELS (summary/menu)
+   ========================================================= */
+
+.mobile-panel{
+  position:fixed;
+  top:0;
+  left:0;
+  right:0;
+  bottom:64px;
+  background:white;
+  z-index:850;
+  padding:16px;
+  overflow-y:auto;
+}
+
+.mobile-panel-menu{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.mobile-panel-menu button{
+  width:100%;
+  text-align:left;
+  background:#f3f4f6;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:12px 14px;
+}
+
+/* =========================================================
+   BOTTOM ACTION SHEET
+   ========================================================= */
+
+.sheet-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.35);
+  z-index:1000;
+}
+
+.bottom-sheet{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:0;
+  background:white;
+  border-radius:18px 18px 0 0;
+  padding:16px;
+  z-index:1001;
+  animation:sheetUp .18s ease-out;
+}
+
+@keyframes sheetUp{
+  from{transform:translateY(100%)}
+  to{transform:translateY(0)}
+}
+
+.sheet-handle{
+  width:40px;
+  height:5px;
+  background:#d1d5db;
+  border-radius:999px;
+  margin:6px auto 14px;
+}
+
+.sheet-content{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.sheet-search{
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+}
+
+.sheet-close{
+  background:white;
+  border:1px solid #111;
+  padding:12px;
+  border-radius:12px;
+}
+
+/* =========================================================
+   JOB FILTERS
+   ========================================================= */
+
+.job-filters{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:10px;
+  padding:12px;
+  margin-bottom:12px;
+  background:white;
+  border:1px solid var(--border);
+  border-radius:12px;
+}
+
+.job-filter-field{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.job-filter-field label{
+  font-size:12px;
+  color:var(--muted);
+  font-weight:600;
+}
+
+.job-filter-field select,
+.job-filter-field input{
+  width:100%;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:white;
+  font-size:14px;
+}
+
+.job-filter-actions{
+  display:flex;
+  align-items:end;
+}
+
+.job-filter-reset{
+  width:100%;
+  background:#f3f4f6;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:9px 12px;
+}

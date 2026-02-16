@@ -1,0 +1,117 @@
+/* =========================
+   JOB CARD (mobile first)
+   ========================= */
+
+.job-card {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.06);
+  border: 1px solid #e5e7eb;
+}
+
+/* header */
+.job-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.job-card-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #111827;
+}
+
+/* status pill */
+.job-card-status {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* status colors */
+.status-NOT_STARTED {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.status-PENDING {
+  background: #fff7ed;
+  color: #9a3412;
+  border: 1px solid #fdba74;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.12);
+}
+
+.status-AWAITING_APPROVAL {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #7dd3fc;
+  box-shadow: 0 0 0 2px rgba(125, 211, 252, 0.2);
+}
+
+.status-LOST {
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.status-IN_PROGRESS {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-PAUSED {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-COMPLETED {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+/* body */
+.job-card-body {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+/* actions */
+.job-card-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+}
+
+.job-card-actions button {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+}
+
+/* action buttons */
+.btn-start {
+  background: #16a34a;
+  color: white;
+}
+
+.btn-pause {
+  background: #f59e0b;
+  color: white;
+}
+
+.btn-complete {
+  background: #2563eb;
+  color: white;
+}

@@ -1,0 +1,73 @@
+/* container */
+.job-update-composer {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 14px;
+}
+
+/* textarea */
+.job-update-textarea {
+  width: 100%;
+  min-height: 120px;
+  resize: vertical;
+  padding: 12px;
+  font-size: 14px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  outline: none;
+}
+
+.job-update-textarea:focus {
+  border-color: #2563eb;
+}
+
+/* ACTION AREA — MOBILE FIRST */
+.job-update-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+/* attachment buttons */
+.job-update-left {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.job-update-left button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  cursor: pointer;
+}
+
+/* update button alignment */
+.job-update-right {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.job-update-right .btn-primary {
+  min-width: 120px;
+  padding: 12px 18px;
+  border-radius: 10px;
+  background: #0284c7;
+  color: #fff;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* desktop enhancement */
+@media (min-width: 768px) {
+  .job-update-actions {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
