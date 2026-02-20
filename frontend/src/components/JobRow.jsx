@@ -21,9 +21,26 @@ export default function JobRow({
     "Service Job";
   const displayStatus = job.display_status || job.status || "";
 
+  function formatDueDate(date) {
+    if (!date) return "Unscheduled";
+
+    const d = new Date(date);
+
+    // catches Invalid Date and epoch
+    if (isNaN(d.getTime()) || d.getFullYear() === 1970) {
+      return "Unscheduled";
+    }
+
+    return d.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric"
+    });
+  }
+
   return (
     <div className={`job-row ${isExpanded ? "expanded" : ""}`}>
-      
+
       {/* Checkbox (NOT clickable) */}
       <input
         type="checkbox"
@@ -35,13 +52,12 @@ export default function JobRow({
 
       {/* CLICKABLE AREA (this is key) */}
       <div className="job-main" onClick={onToggleExpand}>
-        
+
         {/* Identity */}
         <div className="job-identity">
           <div
-            className={`job-badge ${
-              isCorporateJob(job.code) ? "corp" : "ind"
-            }`}
+            className={`job-badge ${isCorporateJob(job.code) ? "corp" : "ind"
+              }`}
           >
             {isCorporateJob(job.code) ? getInitials(job.code) : "#"}
           </div>
@@ -72,8 +88,8 @@ export default function JobRow({
 
       {/* Due */}
       <div className="job-due">
-   {new Date(job.dueDate).toLocaleDateString()}
-</div>
+        {formatDueDate(job.dueDate)}
+      </div>
     </div>
   );
 }

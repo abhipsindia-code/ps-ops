@@ -1,0 +1,10 @@
+{
+  "appId": "com.bestserve.app",
+  "appName": "BestServe",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "url": "https://bestserve.co.in",
+    "cleartext": false
+  }
+}
