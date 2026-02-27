@@ -19,6 +19,14 @@ export const STATUS_OPTIONS = [
   { value: "CANCELED", label: "Canceled" },
 ];
 
+export const TECHNICIAN_STATUS_OPTIONS = [
+  { value: "", label: "All statuses" },
+  { value: "NOT_STARTED", label: "Not Started" },
+  { value: "PENDING", label: "Pending" },
+  { value: "AWAITING_APPROVAL", label: "Awaiting for approval" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+];
+
 export function getSupervisorOptions(jobs) {
   const map = new Map();
   jobs.forEach((job) => {
@@ -68,6 +76,37 @@ export function getTechnicianOptions(jobs) {
   );
 }
 
+export function getCompanyOptions(jobs) {
+  const map = new Map();
+  jobs.forEach((job) => {
+    const companyId =
+      job?.company_id || job?.companyId || job?.company?.id || "";
+    if (!companyId) return;
+
+    const name =
+      job?.companyname || job?.company_name || job?.company?.name || "";
+    const site = job?.site || job?.company_site || job?.company?.site || "";
+    const code = job?.company_code || job?.company?.code || "";
+
+    const parts = [];
+    if (name) parts.push(name);
+    if (site) parts.push(site);
+
+    let label = parts.join(" - ");
+    if (!label) label = code || toStringSafe(companyId);
+    if (code && !label.includes(`(${code})`)) {
+      label = `${label} (${code})`;
+    }
+
+    const value = toStringSafe(companyId);
+    map.set(value, { value, label });
+  });
+
+  return Array.from(map.values()).sort((a, b) =>
+    a.label.localeCompare(b.label)
+  );
+}
+
 function matchesSupervisor(job, supervisorId) {
   if (!supervisorId) return true;
   const sup = job?.supervisor;
@@ -90,6 +129,13 @@ function matchesTechnician(job, technicianId) {
     }
     return toStringSafe(member) === technicianId;
   });
+}
+
+function matchesCompany(job, companyId) {
+  if (!companyId) return true;
+  const value =
+    job?.company_id || job?.companyId || job?.company?.id || "";
+  return toStringSafe(value) === companyId;
 }
 
 function getJobDate(job) {
@@ -130,7 +176,8 @@ export function filterJobs(jobs, filters) {
     if (filters.status && status !== filters.status) return false;
     if (!matchesSupervisor(job, filters.supervisorId)) return false;
     if (!matchesTechnician(job, filters.technicianId)) return false;
-    if (!matchesDateRange(job, filters.startDate, filters.endDate)) return false;
+    if (!matchesCompany(job, filters.companyId)) return false;
+    if (status !== "PENDING" && !matchesDateRange(job, filters.startDate, filters.endDate)) return false;
     return true;
   });
 }

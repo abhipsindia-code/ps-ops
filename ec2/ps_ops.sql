@@ -74,7 +74,8 @@ CREATE TABLE `companies` (
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  `Name` varchar(2550) DEFAULT NULL
+  `Name` varchar(2550) DEFAULT NULL,
+  `Site` varchar(255) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
@@ -561,6 +562,7 @@ CREATE TABLE `recurring_rules` (
   `day_of_week` int DEFAULT NULL,
   `days_of_week` json DEFAULT NULL,
   `day_of_month` int DEFAULT NULL,
+  `week_of_month` int DEFAULT NULL,
   `start_date` date NOT NULL,
   `end_date` date DEFAULT NULL,
   `last_generated_until` date DEFAULT NULL
@@ -667,7 +669,7 @@ ALTER TABLE `bookings`
 --
 ALTER TABLE `companies`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uniq_company_code` (`code`);
+  ADD UNIQUE KEY `uniq_company_code_site` (`code`,`Site`);
 
 --
 -- Indexes for table `contacts`

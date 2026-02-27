@@ -6,7 +6,7 @@ import AssignWorkOrderModal from "../components/AssignWorkOrderModal";
 import CreateBookingModal from "../components/CreateBookingModal";
 import { apiFetch } from "../api";
 import JobFilters from "../components/JobFilters";
-import { filterJobs, getSupervisorOptions, getTechnicianOptions } from "../utils/jobFilters";
+import { filterJobs, getSupervisorOptions, getTechnicianOptions, getCompanyOptions } from "../utils/jobFilters";
 
 
 
@@ -35,23 +35,26 @@ export default function AdminDashboard() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [viewMode, setViewMode] = useState("active");
   const defaultFilters = {
     status: "",
     startDate: "",
     endDate: "",
     supervisorId: "",
     technicianId: "",
+    companyId: "",
   };
   const [filters, setFilters] = useState(defaultFilters);
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
-  const fetchJobs = async () => {
+  const fetchJobs = async (scope = viewMode) => {
     setLoading(true);
     setError(null);
 
     try {
-      const res = await apiFetch("/api/jobs");
+      const query = scope === "summary" ? "?scope=summary" : "";
+      const res = await apiFetch(`/api/jobs${query}`);
       if (!res.ok) throw new Error("Failed to fetch jobs");
       const data = await res.json();
       setJobs(data);
@@ -66,7 +69,12 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchJobs();
-  }, []);
+  }, [viewMode]);
+
+  useEffect(() => {
+    setSelectedJobIds([]);
+    setExpandedJobId(null);
+  }, [viewMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -116,11 +124,11 @@ export default function AdminDashboard() {
     setActionsConfig({
       onCreate: () => setIsCreateOpen(true),
       onAssign: () => setIsAssignOpen(true),
-      disableAssign: selectedJobIds.length === 0,
+      disableAssign: viewMode === "summary" || selectedJobIds.length === 0,
     });
 
     return () => setActionsConfig(null);
-  }, [setActionsConfig, selectedJobIds.length]);
+  }, [setActionsConfig, selectedJobIds.length, viewMode]);
 
   const supervisorOptions = useMemo(() => {
     if (supervisors.length > 0) {
@@ -141,6 +149,8 @@ export default function AdminDashboard() {
     }
     return getTechnicianOptions(jobs);
   }, [technicians, jobs]);
+
+  const companyOptions = useMemo(() => getCompanyOptions(jobs), [jobs]);
   const filteredJobs = useMemo(() => filterJobs(jobs, filters), [jobs, filters]);
 
   //  checkbox 
@@ -161,17 +171,23 @@ export default function AdminDashboard() {
   //handle newbooking
 
   async function handleCreateBooking(form) {
+
     const payload = {
       client: {
         contact_id: form.contact_id,
         serviceType: form.serviceType,
       },
+
       subServices: form.subServices,
-      address: form.location,
+      address: form.location || null,
       start_date: form.start_date,
       end_date: form.end_date,
       notes: form.notes,
       recurrence: form.recurrence || null,
+
+
+      supervisor_id: form.supervisor_id ?? null,
+      technician_id: form.technician_id ?? null,
     };
 
     const res = await apiFetch("/api/jobs", {
@@ -179,21 +195,21 @@ export default function AdminDashboard() {
       body: JSON.stringify(payload),
     });
 
-    if (!res.ok) throw new Error("Create booking failed");
+    if (!res.ok) {
+      const t = await res.text();
+      console.error("Create booking failed:", t);
+      throw new Error("Create booking failed");
+    }
 
     await res.json();
 
     await fetchJobs();
     setIsCreateOpen(false);
-
-
-    setIsCreateOpen(false);
   }
 
 
-
   // assign the job
-  async function handleAssign({ supervisorId, technicianIds, }) {
+  async function handleAssign({ supervisorId, technicianIds, scope, rangeStart, rangeEnd }) {
     const prevJobs = jobs;
     const today = new Date().toISOString().split("T")[0];
 
@@ -211,13 +227,21 @@ export default function AdminDashboard() {
       })
     );
     try {
+      const payload = {
+        jobIds: selectedJobIds,
+        supervisorId,
+        technicianIds,
+      };
+
+      if (selectedJobIds.length === 1 && scope) {
+        payload.scope = scope;
+        payload.rangeStart = rangeStart;
+        payload.rangeEnd = rangeEnd;
+      }
+
       const res = await apiFetch("/api/jobs/assign", {
         method: "POST",
-        body: JSON.stringify({
-          jobIds: selectedJobIds,
-          supervisorId,
-          technicianIds,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error("Assign failed");
@@ -254,14 +278,33 @@ export default function AdminDashboard() {
 
         {/* job list  */}
         <div>
+          <div style={viewToggleRowStyle}>
+            <button
+              type="button"
+              onClick={() => setViewMode("active")}
+              style={viewToggleButtonStyle(viewMode === "active")}
+            >
+              Active Jobs
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("summary")}
+              style={viewToggleButtonStyle(viewMode === "summary")}
+            >
+              Summary Jobs
+            </button>
+          </div>
+
           <JobFilters
             filters={filters}
             setFilters={setFilters}
             onReset={() => setFilters(defaultFilters)}
             supervisorOptions={supervisorOptions}
             technicianOptions={technicianOptions}
+            companyOptions={companyOptions}
             showSupervisor
             showTechnician
+            showCompany
           />
 
           {filteredJobs.map((job) => (
@@ -294,7 +337,7 @@ export default function AdminDashboard() {
           </button>
 
           <button
-            disabled={selectedJobIds.length === 0}
+            disabled={viewMode === "summary" || selectedJobIds.length === 0}
             onClick={() => setIsAssignOpen(true)}
           >
             Assign Work Order
@@ -309,6 +352,8 @@ export default function AdminDashboard() {
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
         onCreate={handleCreateBooking}
+        supervisors={supervisors}
+        technicians={technicians}
       />
 
 
@@ -346,3 +391,19 @@ export default function AdminDashboard() {
     </>
   )
 }
+
+const viewToggleRowStyle = {
+  display: "flex",
+  gap: "8px",
+  marginBottom: "12px",
+};
+
+const viewToggleButtonStyle = (active) => ({
+  padding: "8px 12px",
+  borderRadius: "999px",
+  border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
+  background: active ? "#eff6ff" : "#ffffff",
+  color: "#111827",
+  fontWeight: 600,
+  cursor: "pointer",
+});

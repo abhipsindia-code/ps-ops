@@ -2,6 +2,7 @@ import { createBrowserRouter } from "react-router-dom";
 import AdminLayout from "./layouts/AdminLayout";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminTeamManagement from "./pages/AdminTeamManagement";
+import AdminCompanies from "./pages/AdminCompanies";
 import MapView from "./pages/MapView";
 import JobPage from "./pages/JobPage";
 import BookingsPage from "./pages/BookingsPage";
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <AdminDashboard /> },
       { path: "team", element: <AdminTeamManagement /> },
+      { path: "companies", element: <AdminCompanies /> },
       { path: "map", element: <MapView /> },
       { path: "jobs/:jobId", element: <JobPage /> },
       { path: "bookings", element: <BookingsPage /> },

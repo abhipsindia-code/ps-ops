@@ -1,27 +1,44 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { apiFetch } from "../api";
 import CreateContactModal from "./CreateContactModal";
+import AssignWorkOrderModal from "./AssignWorkOrderModal";
 
 
-export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
+export default function CreateBookingModal({ isOpen, onClose, onCreate, supervisors, technicians }) {
   if (!isOpen) return null;
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+
+  const [assignedSupervisorId, setAssignedSupervisorId] = useState(null);
+  const [assignedTechnicianId, setAssignedTechnicianId] = useState(null);
+
+  const [assignedSupervisorName, setAssignedSupervisorName] = useState("");
+  const [assignedTechnicianName, setAssignedTechnicianName] = useState("");
+  const role = localStorage.getItem("role");
+  const loggedInUserId = Number(localStorage.getItem("userId"));
+
   const [form, setForm] = useState({
     contactId: "",
     serviceType: "BOTH",
     subServices: [],
-    start_date: "",
-    end_date: "",
+    location: "",
     notes: "",
     recurrenceEnabled: false,
     recurrenceType: "WEEKLY",
     recurrenceInterval: 1,
     recurrenceDaysOfWeek: [],
+    recurrenceMonthMode: "day_of_month",
+    recurrenceDayOfMonth: "",
+    recurrenceWeeksOfMonth: [],
+    recurrenceMonthWeekdays: [],
   });
+  const defaultSchedule = { scheduleType: "single", start_date: "", end_date: "" };
+  const [serviceSchedules, setServiceSchedules] = useState({});
 
   const [contacts, setContacts] = useState([]);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [companies, setCompanies] = useState([]);
+  const [contactSearch, setContactSearch] = useState("");
 
   useEffect(() => {
     async function loadContacts() {
@@ -52,6 +69,23 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
     loadCompanies();
   }, []);
 
+  const filteredContacts = useMemo(() => {
+    const query = contactSearch.trim().toLowerCase();
+    if (!query) return contacts;
+    return contacts.filter((c) => {
+      const name = (c.name || "").toLowerCase();
+      const phone = (c.phone || c.contact_phone || "").toLowerCase();
+      const email = (c.email || c.contact_email || "").toLowerCase();
+      const company = (c.company_name || c.company_site || c.company_code || "").toLowerCase();
+      return (
+        name.includes(query) ||
+        phone.includes(query) ||
+        email.includes(query) ||
+        company.includes(query)
+      );
+    });
+  }, [contacts, contactSearch]);
+
   async function reloadContacts() {
     try {
       const res = await apiFetch(`/api/contacts`);
@@ -77,7 +111,6 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
 
   const deepCleaningServices = [
     "Kitchen Cleaning",
-    "Bathroom Cleaning",
     "Sofa Cleaning",
     "Bathroom Cleaning",
     "Full Home Cleaning",
@@ -95,12 +128,34 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
   }
 
   function toggleSubService(service) {
-    setForm(prev => ({
-      ...prev,
-      subServices: prev.subServices.includes(service)
+    setForm(prev => {
+      const isSelected = prev.subServices.includes(service);
+      const nextSubServices = isSelected
         ? prev.subServices.filter(s => s !== service)
-        : [...prev.subServices, service],
-    }));
+        : [...prev.subServices, service];
+      return { ...prev, subServices: nextSubServices };
+    });
+
+    setServiceSchedules(prev => {
+      const next = { ...prev };
+      if (next[service]) {
+        delete next[service];
+      } else {
+        next[service] = { ...defaultSchedule };
+      }
+      return next;
+    });
+  }
+
+  function updateServiceSchedule(service, patch) {
+    setServiceSchedules(prev => {
+      const current = prev[service] || defaultSchedule;
+      const next = { ...current, ...patch };
+      if (next.scheduleType === "single") {
+        next.end_date = "";
+      }
+      return { ...prev, [service]: next };
+    });
   }
 
   function toggleRecurrenceDay(day) {
@@ -116,6 +171,32 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
     });
   }
 
+  function toggleMonthWeek(weekValue) {
+    setForm(prev => {
+      const existing = new Set(prev.recurrenceWeeksOfMonth || []);
+      if (existing.has(weekValue)) {
+        existing.delete(weekValue);
+      } else {
+        existing.add(weekValue);
+      }
+      const nextWeeks = Array.from(existing).sort((a, b) => a - b);
+      return { ...prev, recurrenceWeeksOfMonth: nextWeeks };
+    });
+  }
+
+  function toggleMonthWeekday(day) {
+    setForm(prev => {
+      const existing = new Set(prev.recurrenceMonthWeekdays || []);
+      if (existing.has(day)) {
+        existing.delete(day);
+      } else {
+        existing.add(day);
+      }
+      const nextDays = Array.from(existing).sort((a, b) => a - b);
+      return { ...prev, recurrenceMonthWeekdays: nextDays };
+    });
+  }
+
   async function handleSubmit() {
     if (!form.contactId) {
       alert("Please select who is requesting this booking");
@@ -126,18 +207,57 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
       alert("Please select at least one service");
       return;
     }
-    if (form.start_date && form.end_date) {
-      const start = new Date(form.start_date);
-      const end = new Date(form.end_date);
-      if (end < start) {
-        alert("End date cannot be before start date");
+    const schedulePayload = {};
+    let earliestStart = null;
+    let latestEnd = null;
+
+    for (const service of form.subServices) {
+      const schedule = serviceSchedules[service] || defaultSchedule;
+      const scheduleType = schedule.scheduleType || "single";
+      const startDateValue = schedule.start_date;
+      const endDateValue = scheduleType === "single" ? "" : schedule.end_date;
+
+      if (!startDateValue) {
+        alert(`Date of service is required for ${service}`);
         return;
       }
+
+      if (scheduleType === "range") {
+        if (!endDateValue) {
+          alert(`End date is required for ${service}`);
+          return;
+        }
+        const start = new Date(`${startDateValue}T00:00:00`);
+        const end = new Date(`${endDateValue}T00:00:00`);
+        if (end < start) {
+          alert(`End date cannot be before start date for ${service}`);
+          return;
+        }
+      }
+
+      const startObj = new Date(`${startDateValue}T00:00:00`);
+      const endObj = new Date(`${(endDateValue || startDateValue)}T00:00:00`);
+
+      if (!earliestStart || startObj < earliestStart.date) {
+        earliestStart = { date: startObj, value: startDateValue };
+      }
+      if (!latestEnd || endObj > latestEnd.date) {
+        latestEnd = { date: endObj, value: endDateValue || startDateValue };
+      }
+
+      schedulePayload[service] = {
+        scheduleType,
+        start_date: startDateValue,
+        end_date: endDateValue || null,
+      };
     }
+
+    const startDateValue = earliestStart?.value || "";
+    const endDateValue = latestEnd?.value || "";
 
     let recurrence = null;
     if (recurrenceActive) {
-      if (!form.start_date) {
+      if (!startDateValue) {
         alert("Start date is required for recurring bookings");
         return;
       }
@@ -145,6 +265,17 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
       let frequency = "WEEKLY";
       let intervalValue = 1;
       let daysOfWeek = [];
+      let dayOfMonth = null;
+      let weekOfMonth = null;
+      let dayOfWeek = null;
+      const startDateObj = startDateValue
+        ? new Date(`${startDateValue}T00:00:00`)
+        : null;
+      const fallbackDayOfMonth = startDateObj ? startDateObj.getDate() : 1;
+      const fallbackDayOfWeek = startDateObj ? startDateObj.getDay() : 1;
+      const fallbackWeekOfMonth = startDateObj
+        ? Math.floor((startDateObj.getDate() - 1) / 7) + 1
+        : 1;
 
       switch (form.recurrenceType) {
         case "DAILY":
@@ -168,6 +299,22 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
         case "CUSTOM_MONTHS":
           frequency = "MONTHLY";
           intervalValue = Number(form.recurrenceInterval) || 1;
+          if (form.recurrenceMonthMode === "week_day") {
+            const weekSelections = (form.recurrenceWeeksOfMonth || [])
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && (value === -1 || (value >= 1 && value <= 5)));
+            const daySelections = (form.recurrenceMonthWeekdays || [])
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value >= 0 && value <= 6);
+
+            weekOfMonth = weekSelections.length ? weekSelections : [fallbackWeekOfMonth];
+            daysOfWeek = daySelections.length ? daySelections : [fallbackDayOfWeek];
+          } else {
+            dayOfMonth = Number(form.recurrenceDayOfMonth);
+            if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+              dayOfMonth = fallbackDayOfMonth;
+            }
+          }
           break;
         default:
           frequency = "WEEKLY";
@@ -176,7 +323,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
       }
 
       if ((form.recurrenceType === "WEEKLY" || form.recurrenceType === "CUSTOM_WEEKS") && daysOfWeek.length === 0) {
-        const startDay = new Date(`${form.start_date}T00:00:00`).getDay();
+        const startDay = new Date(`${startDateValue}T00:00:00`).getDay();
         daysOfWeek = [startDay];
       }
 
@@ -184,18 +331,27 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
         frequency,
         interval_value: intervalValue,
         days_of_week: daysOfWeek.length ? daysOfWeek : null,
+        day_of_month: dayOfMonth,
+        day_of_week: dayOfWeek,
+        week_of_month: weekOfMonth,
       };
     }
+
+    const locationValue = typeof form.location === "string" ? form.location.trim() : "";
 
     try {
       await onCreate({
         contact_id: form.contactId,
         serviceType: form.serviceType,
         subServices: form.subServices,
-        start_date: form.start_date,
-        end_date: form.end_date,
+        start_date: startDateValue,
+        end_date: endDateValue || null,
+        serviceSchedules: schedulePayload,
+        location: locationValue,
         notes: form.notes,
         recurrence,
+        supervisor_id: assignedSupervisorId,
+        technician_id: assignedTechnicianId
       });
     } catch (err) {
       console.error("Create booking failed", err);
@@ -282,6 +438,13 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
     textAlign: "center",
   });
 
+  const serviceScheduleCard = {
+    border: "1px solid #e5e7eb",
+    borderRadius: "10px",
+    padding: "12px",
+    background: "#f9fafb",
+  };
+
   const daysOfWeek = [
     { value: 0, label: "Sunday" },
     { value: 1, label: "Monday" },
@@ -292,11 +455,23 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
     { value: 6, label: "Saturday" },
   ];
 
+  const monthWeeks = [
+    { value: 1, label: "1st" },
+    { value: 2, label: "2nd" },
+    { value: 3, label: "3rd" },
+    { value: 4, label: "4th" },
+    { value: 5, label: "5th" },
+    { value: -1, label: "Last" },
+  ];
+
+  const monthDays = Array.from({ length: 31 }, (_, i) => i + 1);
+
   const recurrenceActive = form.recurrenceEnabled;
   const recurrenceUsesWeekdays = form.recurrenceType === "WEEKLY" || form.recurrenceType === "CUSTOM_WEEKS";
   const recurrenceNeedsInterval = form.recurrenceType === "CUSTOM_DAYS"
     || form.recurrenceType === "CUSTOM_WEEKS"
     || form.recurrenceType === "CUSTOM_MONTHS";
+  const recurrenceIsMonthly = form.recurrenceType === "CUSTOM_MONTHS";
 
   /* ---------- RENDER ---------- */
 
@@ -314,6 +489,14 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
           <div style={section}>
             <h4>Requested By</h4>
 
+            <input
+              type="text"
+              value={contactSearch}
+              onChange={(e) => setContactSearch(e.target.value)}
+              placeholder="Search contacts by name, phone, email, or company"
+              style={{ ...input, marginBottom: "10px" }}
+            />
+
             <select
               value={form.contactId}
               onChange={e =>
@@ -328,14 +511,19 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
                 {loadingContacts ? "Loading contacts…" : "Select requester"}
               </option>
 
-              {contacts.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {c.company_name || c.company_code ? " - " : ""}
-                  {c.company_name || ""}
-                  {c.company_code ? ` (${c.company_code})` : ""}
-                </option>
-              ))}
+              {filteredContacts.map(c => {
+                const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
+                const phoneLabel = c.phone || c.contact_phone || "";
+                return (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {phoneLabel ? ` - ${phoneLabel}` : ""}
+                    {companyLabel || c.company_code ? " - " : ""}
+                    {companyLabel}
+                    {c.company_code ? ` (${c.company_code})` : ""}
+                  </option>
+                );
+              })}
             </select>
 
 
@@ -366,6 +554,18 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
             />
           )}
 
+
+          {/* ADDRESS / LOCATION */}
+          <div style={section}>
+            <h4>Service Address / Location</h4>
+            <input
+              type="text"
+              value={form.location}
+              onChange={e => update("location", e.target.value)}
+              placeholder="Enter service address or location"
+              style={input}
+            />
+          </div>
 
           {/* SERVICE TYPE */}
           <div style={section}>
@@ -403,37 +603,115 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
             </div>
           </div>
 
-          {/* SCHEDULE */}
+          {/* SERVICE SCHEDULES */}
           <div style={section}>
-            <h4>Schedule</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                  Start Date
-                </div>
-                <input
-                  type="date"
-                  value={form.start_date}
-                  onChange={e => update("start_date", e.target.value)}
-                  max={form.end_date || undefined}
-                  style={input}
-                />
+            <h4>Service Schedules</h4>
+            {form.subServices.length === 0 ? (
+              <div style={{ fontSize: "13px", color: "#6b7280" }}>
+                Select services to set dates.
               </div>
-              <div>
-                <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
-                  End Date
-                </div>
-                <input
-                  type="date"
-                  value={form.end_date}
-                  onChange={e => update("end_date", e.target.value)}
-                  min={form.start_date || undefined}
-                  style={input}
-                />
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {form.subServices.map(service => {
+                  const schedule = serviceSchedules[service] || defaultSchedule;
+                  return (
+                    <div key={service} style={serviceScheduleCard}>
+                      <div style={{ fontWeight: 600, marginBottom: 8 }}>{service}</div>
+                      <div style={{ marginBottom: "12px" }}>
+                        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                          Schedule Type
+                        </div>
+                        <div style={pillRow}>
+                          {[
+                            { key: "single", label: "Single Day" },
+                            { key: "range", label: "Multi-day" },
+                          ].map((option) => (
+                            <div
+                              key={option.key}
+                              style={pill(schedule.scheduleType === option.key)}
+                              onClick={() => updateServiceSchedule(service, { scheduleType: option.key })}
+                            >
+                              {option.label}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {schedule.scheduleType === "single" ? (
+                        <div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                            Date of Service
+                          </div>
+                          <input
+                            type="date"
+                            value={schedule.start_date || ""}
+                            onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
+                            style={input}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                          <div>
+                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                              Start Date
+                            </div>
+                            <input
+                              type="date"
+                              value={schedule.start_date || ""}
+                              onChange={e => updateServiceSchedule(service, { start_date: e.target.value })}
+                              max={schedule.end_date || undefined}
+                              style={input}
+                            />
+                          </div>
+                          <div>
+                            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                              End Date
+                            </div>
+                            <input
+                              type="date"
+                              value={schedule.end_date || ""}
+                              onChange={e => updateServiceSchedule(service, { end_date: e.target.value })}
+                              min={schedule.start_date || undefined}
+                              style={input}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </div>
 
+          {/* Assignment */}
+          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 12 }}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setShowAssignModal(true)}
+            >
+              Assign Team
+            </button>
+            {(assignedSupervisorId || assignedTechnicianId) && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  background: "#eef2ff",
+                  border: "1px solid #c7d2fe",
+                  fontSize: 13,
+                  color: "#1e3a8a",
+                }}
+              >
+                <strong>Assigned:</strong>{" "}
+                {assignedSupervisorName || "No supervisor"}
+                {"  •  "}
+                {assignedTechnicianName || "No technician"}
+              </div>
+            )}
+          </div>
           {/* RECURRENCE */}
           <div style={section}>
             <h4>Recurring</h4>
@@ -508,6 +786,81 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
                   </div>
                 )}
 
+                {recurrenceIsMonthly && (
+                  <div style={{ marginTop: "12px" }}>
+                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                      Monthly Pattern
+                    </div>
+                    <div style={pillRow}>
+                      {[
+                        { key: "day_of_month", label: "Day of Month" },
+                        { key: "week_day", label: "Week & Day" },
+                      ].map(option => (
+                        <div
+                          key={option.key}
+                          style={pill(form.recurrenceMonthMode === option.key)}
+                          onClick={() => update("recurrenceMonthMode", option.key)}
+                        >
+                          {option.label}
+                        </div>
+                      ))}
+                    </div>
+
+                    {form.recurrenceMonthMode === "day_of_month" ? (
+                      <div style={{ marginTop: "12px" }}>
+                        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                          Day of Month
+                        </div>
+                        <select
+                          value={form.recurrenceDayOfMonth}
+                          onChange={e => update("recurrenceDayOfMonth", e.target.value)}
+                          style={input}
+                        >
+                          <option value="">Use start date</option>
+                          {monthDays.map(day => (
+                            <option key={day} value={day}>{day}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: "12px", display: "grid", gap: "12px" }}>
+                        <div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                            Weeks of Month
+                          </div>
+                          <div style={pillRow}>
+                            {monthWeeks.map(week => (
+                              <div
+                                key={week.value}
+                                style={pill(form.recurrenceWeeksOfMonth.includes(week.value))}
+                                onClick={() => toggleMonthWeek(week.value)}
+                              >
+                                {week.label}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
+                            Days of Week
+                          </div>
+                          <div style={pillRow}>
+                            {daysOfWeek.map(day => (
+                              <div
+                                key={day.value}
+                                style={dayPill(form.recurrenceMonthWeekdays.includes(day.value))}
+                                onClick={() => toggleMonthWeekday(day.value)}
+                              >
+                                {day.label}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {recurrenceUsesWeekdays && (
                   <div style={{ marginTop: "12px" }}>
                     <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>
@@ -557,9 +910,30 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, }) {
           </button>
         </div>
       </div>
+      <AssignWorkOrderModal
+        isOpen={showAssignModal}
+        jobCount={1}
+        role={role}
+        onClose={() => setShowAssignModal(false)}
+        hideSupervisor={role === "supervisor"}
+        onAssign={({ supervisorId, technicianIds }) => {
+
+          const techId = technicianIds?.[0] || null;
+
+          setAssignedSupervisorId(supervisorId);
+          setAssignedTechnicianId(techId);
+
+          // Resolve display names
+          const sup = supervisors?.find(u => String(u.id) === String(supervisorId));
+          const tech = technicians?.find(u => String(u.id) === String(techId));
+
+          setAssignedSupervisorName(sup?.name || `Supervisor #${supervisorId}`);
+          setAssignedTechnicianName(tech?.name || (techId ? `Tech #${techId}` : ""));
+
+          setShowAssignModal(false);
+        }}
+      />
     </div>
+
   );
 }
-
-
-

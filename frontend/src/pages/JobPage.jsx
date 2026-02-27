@@ -20,6 +20,7 @@ export default function JobPage() {
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [dateForm, setDateForm] = useState({ start_date: "", end_date: "" });
+  const [scheduleType, setScheduleType] = useState("single");
   const [savingDates, setSavingDates] = useState(false);
   const role = localStorage.getItem("role");
   const canAssign = role !== "technician";
@@ -59,6 +60,7 @@ export default function JobPage() {
             ? new Date(jobData.dueDate).toISOString().slice(0, 10)
             : "",
         });
+        setScheduleType(jobData.dueDate ? "range" : "single");
 
         await reloadHistory();
       } catch (err) {
@@ -74,8 +76,12 @@ export default function JobPage() {
   if (loading) return <div>Loading…</div>;
   if (!job) return <div>Job not found</div>;
   const jobstatus = job.status;
+  const displayStatus = job.display_status || jobstatus;
   const approvalStatus = job.approval_status;
   const awaitingApproval = approvalStatus === "PENDING" && ["IN_PROGRESS", "PAUSED"].includes(jobstatus);
+  const isCanceled = jobstatus === "CANCELED";
+  const isLost = displayStatus === "LOST";
+  const canStart = jobstatus === "NOT_STARTED" && !isCanceled && !isLost;
   async function updateStatus(newStatus) {
     try {
       const token = localStorage.getItem("token");
@@ -120,11 +126,24 @@ export default function JobPage() {
   }
 
   async function handleSaveDates() {
-    if (dateForm.start_date && dateForm.end_date) {
-      const start = new Date(dateForm.start_date);
-      const end = new Date(dateForm.end_date);
+    const isSingleDay = scheduleType === "single";
+    const startDateValue = dateForm.start_date;
+    const endDateValue = isSingleDay ? "" : dateForm.end_date;
+
+    if (isSingleDay) {
+      if (!startDateValue) {
+        alert("Date of service is required");
+        return;
+      }
+    } else {
+      if (!startDateValue || !endDateValue) {
+        alert("Start and end dates are required for multi-day schedules");
+        return;
+      }
+      const start = new Date(startDateValue);
+      const end = new Date(endDateValue);
       if (end < start) {
-        console.error("End date cannot be before start date");
+        alert("End date cannot be before start date");
         return;
       }
     }
@@ -133,8 +152,8 @@ export default function JobPage() {
       const res = await apiFetch(`/api/jobs/${jobId}/dates`, {
         method: "PATCH",
         body: JSON.stringify({
-          start_date: dateForm.start_date || null,
-          end_date: dateForm.end_date || null,
+          start_date: startDateValue || null,
+          end_date: endDateValue || null,
         }),
       });
 
@@ -149,7 +168,7 @@ export default function JobPage() {
     }
   }
 
-  async function handleAssignSingle({ supervisorId, technicianIds }) {
+  async function handleAssignSingle({ supervisorId, technicianIds, scope, rangeStart, rangeEnd }) {
     try {
       const res = await apiFetch(`/api/jobs/assign`, {
         method: "POST",
@@ -157,6 +176,9 @@ export default function JobPage() {
           jobIds: [job.id],
           supervisorId,
           technicianIds,
+          scope,
+          rangeStart,
+          rangeEnd,
         }),
       });
 
@@ -186,30 +208,65 @@ export default function JobPage() {
           <JobHeader job={job} setIsAssignOpen={canAssign ? setIsAssignOpen : null} />
           <div className="job-schedule-card">
             <div className="job-schedule-title">Schedule</div>
-            <div className="job-schedule-grid">
-              <label className="job-schedule-field">
-                <span>Start date</span>
-                <input
-                  type="date"
-                  value={dateForm.start_date}
-                  onChange={(e) =>
-                    setDateForm((prev) => ({ ...prev, start_date: e.target.value }))
-                  }
-                  max={dateForm.end_date || undefined}
-                />
-              </label>
-              <label className="job-schedule-field">
-                <span>End date</span>
-                <input
-                  type="date"
-                  value={dateForm.end_date}
-                  onChange={(e) =>
-                    setDateForm((prev) => ({ ...prev, end_date: e.target.value }))
-                  }
-                  min={dateForm.start_date || undefined}
-                />
-              </label>
+            <div className="job-schedule-toggle">
+              <button
+                type="button"
+                className={`job-schedule-pill ${scheduleType === "single" ? "active" : ""}`}
+                onClick={() => {
+                  setScheduleType("single");
+                  setDateForm((prev) => ({ ...prev, end_date: "" }));
+                }}
+              >
+                Single Day
+              </button>
+              <button
+                type="button"
+                className={`job-schedule-pill ${scheduleType === "range" ? "active" : ""}`}
+                onClick={() => setScheduleType("range")}
+              >
+                Multi-day
+              </button>
             </div>
+
+            {scheduleType === "single" ? (
+              <div className="job-schedule-grid">
+                <label className="job-schedule-field">
+                  <span>Date of service</span>
+                  <input
+                    type="date"
+                    value={dateForm.start_date}
+                    onChange={(e) =>
+                      setDateForm((prev) => ({ ...prev, start_date: e.target.value }))
+                    }
+                  />
+                </label>
+              </div>
+            ) : (
+              <div className="job-schedule-grid">
+                <label className="job-schedule-field">
+                  <span>Start date</span>
+                  <input
+                    type="date"
+                    value={dateForm.start_date}
+                    onChange={(e) =>
+                      setDateForm((prev) => ({ ...prev, start_date: e.target.value }))
+                    }
+                    max={dateForm.end_date || undefined}
+                  />
+                </label>
+                <label className="job-schedule-field">
+                  <span>End date</span>
+                  <input
+                    type="date"
+                    value={dateForm.end_date}
+                    onChange={(e) =>
+                      setDateForm((prev) => ({ ...prev, end_date: e.target.value }))
+                    }
+                    min={dateForm.start_date || undefined}
+                  />
+                </label>
+              </div>
+            )}
             <button
               className="job-schedule-save"
               onClick={handleSaveDates}
@@ -228,7 +285,7 @@ export default function JobPage() {
     </div>
   )}
 
-  {jobstatus === "NOT_STARTED" && (
+  {canStart && (
     <button
       className="job-btn job-btn-start"
       onClick={() => updateStatus("IN_PROGRESS")}
@@ -238,46 +295,55 @@ export default function JobPage() {
   )}
 
   {jobstatus === "IN_PROGRESS" && !awaitingApproval && (
-    <div className="job-actions-row">
+    role === "technician" ? (
       <button
-        className="job-btn job-btn-pause"
-        onClick={() => updateStatus("PAUSED")}
+        className="job-btn job-btn-complete"
+        onClick={submitForApproval}
       >
-        Pause
+        Submit for Approval
       </button>
-
-      {role === "technician" ? (
+    ) : (
+      <div className="job-actions-row">
+        <button
+          className="job-btn job-btn-pause"
+          onClick={() => updateStatus("PAUSED")}
+        >
+          Pause
+        </button>
         <button
           className="job-btn job-btn-complete"
-          onClick={submitForApproval}
+          onClick={() => updateStatus("COMPLETED")}
         >
-          Submit for Approval
+          Complete
         </button>
-      ) : (
-        <div className="job-actions-info">
-          Waiting for technician submission
-        </div>
-      )}
-    </div>
+      </div>
+    )
   )}
 
   {jobstatus === "PAUSED" && !awaitingApproval && (
-    <div className="job-actions-row">
+    role === "technician" ? (
       <button
-        className="job-btn job-btn-resume"
-        onClick={() => updateStatus("IN_PROGRESS")}
+        className="job-btn job-btn-complete"
+        onClick={submitForApproval}
       >
-        Resume
+        Submit for Approval
       </button>
-      {role === "technician" && (
+    ) : (
+      <div className="job-actions-row">
+        <button
+          className="job-btn job-btn-resume"
+          onClick={() => updateStatus("IN_PROGRESS")}
+        >
+          Resume
+        </button>
         <button
           className="job-btn job-btn-complete"
-          onClick={submitForApproval}
+          onClick={() => updateStatus("COMPLETED")}
         >
-          Submit for Approval
+          Complete
         </button>
-      )}
-    </div>
+      </div>
+    )
   )}
 
   {awaitingApproval && (

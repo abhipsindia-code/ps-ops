@@ -20,10 +20,33 @@
   cursor: pointer;
 }
 
-.job-card-title {
-  font-size: 17px;
-  font-weight: 600;
+.job-card-headings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.job-card-company {
+  font-size: 16px;
+  font-weight: 700;
   color: #111827;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.job-card-site {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.job-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #374151;
 }
 
 /* status pill */

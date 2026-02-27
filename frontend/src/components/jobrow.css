@@ -40,6 +40,7 @@
 /* identity line */
 .job-identity{
   display:flex;
+  flex-direction: column;
   align-items:center;
   gap:10px;
   min-width:0;
@@ -69,6 +70,7 @@
 
 .job-identity-text{
   display:flex;
+  align-items: center;
   flex-direction:column;
   min-width:0;
 }
@@ -119,8 +121,18 @@
 /* status + due row */
 .job-assignee-status{
   display:flex;
-  justify-content:space-between;
+  flex-direction: row;
+  justify-content:space-evenly;
   align-items:center;
+  gap:10px;
+  width:100%;
+}
+
+/* mobile status + due */
+.job-right{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   gap:10px;
   width:100%;
 }
@@ -183,46 +195,157 @@
 }
 
 /* =====================================================
-   DESKTOP LAYOUT
+   DESKTOP (≥768px)
    ===================================================== */
 
-@media (min-width: 768px){
+@media (min-width:768px){
 
-  .job-row{
-    display:grid;
-    grid-template-columns:
-      40px
-      minmax(0, 2fr)
-      160px
-      120px;
-    align-items:center;
-    gap:16px;
-    padding:14px;
-  }
+.job-row{
+  display:grid;
+  align-items:center;
+  gap:18px;
+  padding:14px 18px;
 
+  grid-template-columns:
+    36px          /* checkbox */
+    260px         /* identity */
+    1fr           /* service grows */
+    180px         /* supervisor */
+    160px;        /* status + due */
+}
+
+.job-right{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-end;
+  gap:6px;
+}
+
+.job-supervisor-block{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+
+.job-supervisor-label{
+  font-size:10px;
+  text-transform:uppercase;
+  color:#9ca3af;
+  letter-spacing:.5px;
+}
+
+.job-supervisor-name{
+  font-size:13px;
+  font-weight:600;
+  color:#374151;
+}
+
+.job-companyname{
+  font-size:14px;
+  font-weight:600;
+  color:#374151;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.job-title{
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+  /* stop mobile stacking */
   .job-main{
-    flex-direction:row;
-    align-items:center;
-    gap:18px;
+    display:contents;
   }
 
+  /* identity block */
   .job-identity{
-    min-width:180px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    min-width:0;
   }
 
+  .job-companyname{
+    font-size:14px;
+    font-weight:600;
+    color:#374151;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:220px;
+  }
+
+  .job-identity-text{
+    min-width:0;
+  }
+
+  .job-code{
+    font-size:13px;
+  }
+
+  .job-customer-type{
+    font-size:12px;
+  }
+
+  /* SERVICE COLUMN (the important one) */
   .job-title{
     font-size:17px;
+    font-weight:600;
+    min-width:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
 
-  .job-assignee-status{
+  /* RIGHT SIDE PANEL */
+  .job-right{
+    display:flex;
     flex-direction:column;
     align-items:flex-end;
+    justify-content:center;
     gap:6px;
+    text-align:right;
+    min-width:0;
+  }
+
+  .job-supervisor-block{
+    line-height:1.1;
+  }
+
+  .job-supervisor-label{
+    font-size:10px;
+    text-transform:uppercase;
+    color:#9ca3af;
+    letter-spacing:.5px;
+  }
+
+  .job-supervisor-name{
+    font-size:13px;
+    font-weight:600;
+    color:#374151;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    max-width:200px;
+  }
+
+  .job-status{
+    padding:5px 12px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:700;
+    white-space:nowrap;
   }
 
   .job-due{
-    text-align:right;
+    font-size:12px;
+    color:#9ca3af;
+    white-space:nowrap;
   }
+
 }
 
 /* =====================================================
@@ -264,6 +387,96 @@
 }
 
 /* =====================================================
+   TIMELINE
+   ===================================================== */
+
+.job-timeline{
+  margin-top:14px;
+}
+
+.timeline-item{
+  display:flex;
+  gap:12px;
+  padding:10px 0;
+  border-bottom:1px solid #f1f5f9;
+}
+
+.timeline-content{
+  flex:1;
+  min-width:0;
+}
+
+.timeline-item:last-child{
+  border-bottom:none;
+}
+
+.timeline-icon{
+  display:flex;
+  align-items:flex-start;
+  justify-content:center;
+  width:28px;
+  flex-shrink:0;
+}
+
+.timeline-icon-badge{
+  width:26px;
+  height:26px;
+  border-radius:999px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:14px;
+  background:#f1f5f9;
+  color:#1f2937;
+}
+
+.timeline-icon-created{
+  background:#e0f2fe;
+  color:#0369a1;
+}
+
+.timeline-icon-comment{
+  background:#ede9fe;
+  color:#5b21b6;
+}
+
+.timeline-icon-assigned{
+  background:#dcfce7;
+  color:#166534;
+}
+
+.timeline-icon-status{
+  background:#fef3c7;
+  color:#b45309;
+}
+
+.timeline-meta{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.timeline-author{
+  font-size:14px;
+  color:#111827;
+}
+
+.timeline-date{
+  font-size:12px;
+  color:#6b7280;
+  white-space:nowrap;
+  margin-left:auto;
+}
+
+.timeline-message{
+  font-size:14px;
+  color:#374151;
+  margin-top:4px;
+  line-height:1.4;
+}
+
+/* =====================================================
    ATTACHMENTS (timeline thumbnails)
    ===================================================== */
 
@@ -287,6 +500,66 @@
   font-size:13px;
   color:#2563eb;
   text-decoration:none;
+}
+
+.attachment-file-row{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid #e5e7eb;
+  background:#f8fafc;
+  max-width:100%;
+}
+
+.attachment-file-name{
+  font-size:13px;
+  color:#111827;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:220px;
+}
+
+.attachment-file-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-left:auto;
+}
+
+.attachment-download-btn{
+  padding:4px 8px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+  background:#fff;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.attachment-load-btn{
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid #d1d5db;
+  background:#f9fafb;
+  font-size:12px;
+  cursor:pointer;
+}
+
+.attachment-audio{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  padding:6px 10px;
+  border-radius:8px;
+  border:1px solid #e5e7eb;
+  background:#f8fafc;
+}
+
+.attachment-audio audio{
+  width:220px;
+  max-width:100%;
 }
 
 /* image viewer */

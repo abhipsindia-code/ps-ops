@@ -29,6 +29,47 @@
   gap: 16px;
 }
 
+.bookings-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.bookings-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.bookings-filter-field label {
+  font-weight: 600;
+}
+
+.bookings-filter-field select,
+.bookings-filter-field input {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+}
+
+.bookings-filter-reset {
+  grid-column: 1 / -1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f8fafc;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .booking-list-card {
   background: #ffffff;
   border-radius: 16px;
@@ -202,6 +243,10 @@
 }
 
 @media (max-width: 900px) {
+  .bookings-filters {
+    grid-template-columns: 1fr;
+  }
+
   .booking-sections {
     grid-template-columns: 1fr;
   }

@@ -46,6 +46,30 @@
   color: #111827;
 }
 
+/* schedule toggle */
+.job-schedule-toggle {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.job-schedule-pill {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.job-schedule-pill.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 /* schedule fields */
 .job-schedule-grid {
   display: grid;

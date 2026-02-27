@@ -5,8 +5,11 @@ export default function JobFilters({
   setFilters,
   supervisorOptions = [],
   technicianOptions = [],
+  companyOptions = [],
+  statusOptions = STATUS_OPTIONS,
   showSupervisor = false,
   showTechnician = false,
+  showCompany = false,
   onReset,
 }) {
   function update(key, value) {
@@ -21,13 +24,30 @@ export default function JobFilters({
           value={filters.status}
           onChange={(e) => update("status", e.target.value)}
         >
-          {STATUS_OPTIONS.map((opt) => (
+          {statusOptions.map((opt) => (
             <option key={opt.value || "all"} value={opt.value}>
               {opt.label}
             </option>
           ))}
         </select>
       </div>
+
+      {showCompany && (
+        <div className="job-filter-field">
+          <label>Company</label>
+          <select
+            value={filters.companyId}
+            onChange={(e) => update("companyId", e.target.value)}
+          >
+            <option value="">All companies</option>
+            {companyOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="job-filter-field">
         <label>Start Date</label>

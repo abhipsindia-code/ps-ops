@@ -1,71 +1,89 @@
-.contact-section {
-  margin-top: 20px;
-  padding: 18px;
-  background: #f8fafc;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
-}
-
+/* ===== Modal Overlay ===== */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1200;
 }
 
+/* ===== Modal Card ===== */
 .modal-card {
   background: #ffffff;
   border-radius: 12px;
-  padding: 18px;
-  width: 520px;
-  max-width: 92vw;
-  box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+  padding: 20px;
+  width: 600px;
+  max-width: 94vw;
+  box-shadow: 0 22px 60px rgba(0,0,0,0.25);
 }
 
-.contact-section h4 {
-  margin-bottom: 12px;
+/* ===== Heading ===== */
+.modal-card h4 {
+  margin: 0 0 14px 0;
   font-size: 16px;
   font-weight: 600;
+  color: #111827;
 }
 
+/* ===== Form Grid ===== */
 .contact-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
+/* Inputs + Selects */
 .contact-grid input,
 .contact-grid select {
   width: 100%;
-  padding: 10px;
+  padding: 10px 11px;
   border-radius: 8px;
   border: 1px solid #d1d5db;
   font-size: 14px;
+  background: #fff;
+  transition: border .15s ease, box-shadow .15s ease;
 }
 
 .contact-grid input:focus,
 .contact-grid select:focus {
   outline: none;
   border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.15);
 }
 
+/* ===== Company Block ===== */
+.company-select-block{
+  grid-column: span 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+
+/* ===== Role field full width ===== */
+.contact-grid input[placeholder^="Role"]{
+  grid-column: span 2;
+}
+
+/* ===== Checkbox ===== */
 .checkbox-row {
   grid-column: span 2;
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 14px;
+  color:#374151;
 }
 
+/* ===== Actions ===== */
 .contact-actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .contact-actions .primary {
@@ -75,6 +93,11 @@
   border-radius: 8px;
   border: none;
   cursor: pointer;
+  font-size: 14px;
+}
+
+.contact-actions .primary:hover{
+  background:#1d4ed8;
 }
 
 .contact-actions .secondary {
@@ -83,4 +106,33 @@
   border-radius: 8px;
   border: none;
   cursor: pointer;
+  font-size: 14px;
+}
+
+.contact-actions .secondary:hover{
+  background:#e5e7eb;
+}
+
+
+
+/* ===== Responsive ===== */
+@media (max-width: 640px) {
+
+  .modal-card{
+    width:95vw;
+    padding:16px;
+  }
+
+  .contact-grid{
+    grid-template-columns: 1fr;
+  }
+
+
+  .contact-grid input[placeholder^="Role"]{
+    grid-column: span 1;
+  }
+
+  .checkbox-row{
+    grid-column: span 1;
+  }
 }

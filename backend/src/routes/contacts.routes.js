@@ -20,7 +20,8 @@ router.get("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
         c.company_id,
         co.name AS company_name,
         co.code AS company_code,
-        co.type AS company_type
+        co.type AS company_type,
+        co.site AS company_site
       FROM contacts c
       LEFT JOIN companies co ON c.company_id = co.id
       WHERE c.is_verified = 1
@@ -81,7 +82,7 @@ router.post("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
     let companyMeta = null;
     if (company_id) {
       const [[company]] = await pool.query(
-        "SELECT id, name, code, type FROM companies WHERE id = ?",
+        "SELECT id, name, code, type, site FROM companies WHERE id = ?",
         [company_id]
       );
       if (company) {
@@ -90,6 +91,7 @@ router.post("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
           name: company.name || null,
           code: company.code || null,
           type: company.type || null,
+          site: company.site || null,
         };
       }
     }
@@ -105,6 +107,7 @@ router.post("/", auth, allowRoles("admin", "supervisor"), async (req, res) => {
         company_code: companyMeta?.code || null,
         company_name: companyMeta?.name || null,
         company_type: companyMeta?.type || null,
+        company_site: companyMeta?.site || null,
         role: role || null,
         is_primary: is_primary ? 1 : 0,
       },

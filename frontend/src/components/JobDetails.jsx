@@ -27,6 +27,7 @@ export default function JobDetails({ job }) {
       : "") ||
     "Service Job";
   const displayStatus = job.display_status || job.status || "";
+  const hasScheduleRange = Boolean(job.dueDate);
   
 
   useEffect(() => {
@@ -98,7 +99,9 @@ export default function JobDetails({ job }) {
 
       <div className="job-details-meta">
         <div className="job-details-item">
-          <div className="job-details-label">Start Date</div>
+          <div className="job-details-label">
+            {hasScheduleRange ? "Start Date" : "Date of Service"}
+          </div>
           <div className="job-details-value">
             {job.start_date
               ? new Date(job.start_date).toLocaleString("en-IN", {
@@ -106,6 +109,25 @@ export default function JobDetails({ job }) {
                 timeStyle: "short"
               })
               : "—"}
+          </div>
+        </div>
+        {hasScheduleRange && (
+          <div className="job-details-item">
+            <div className="job-details-label">End Date</div>
+            <div className="job-details-value">
+              {job.dueDate
+                ? new Date(job.dueDate).toLocaleString("en-IN", {
+                  dateStyle: "medium",
+                  timeStyle: "short"
+                })
+                : "—"}
+            </div>
+          </div>
+        )}
+        <div className="job-details-item">
+          <div className="job-details-label">Address</div>
+          <div className="job-details-value">
+            {job.address || "—"}
           </div>
         </div>
         <div className="job-details-item">
@@ -186,3 +208,5 @@ export default function JobDetails({ job }) {
     </div>
   );
 }
+
+

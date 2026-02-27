@@ -5,7 +5,7 @@ const auth = require("../middleware/auth.middleware");
 const { allowRoles } = require("../middleware/roleMiddleware");
 
 // GET /api/users?role=supervisor|technician
-router.get("/", auth, allowRoles("admin"), async (req, res) => {
+router.get("/", auth, allowRoles("admin","supervisor"), async (req, res) => {
   const { role } = req.query;
 
   try {

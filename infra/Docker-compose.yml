@@ -6,6 +6,8 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: ps-backend
+    environment:
+      - TZ=Asia/Kolkata
     ports:
       - "3000:3000"
     env_file:

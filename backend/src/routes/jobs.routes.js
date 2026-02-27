@@ -70,28 +70,104 @@ const ensureJobAccess = async (req, res, executor, jobId) => {
 
   return true;
 };
+
+const updateFutureRecurringJobs = async (
+  executor,
+  bookingId,
+  startDate,
+  supervisorId,
+  teamJson
+) => {
+  if (!bookingId || !startDate) return 0;
+
+  const [result] = await executor.query(
+    `
+    UPDATE jobs
+    SET supervisor_id = ?, team = ?, updated_at = NOW()
+    WHERE booking_id = ?
+      AND start_date IS NOT NULL
+      AND DATE(start_date) > DATE(?)
+    `,
+    [supervisorId, teamJson, bookingId, startDate]
+  );
+
+  return result?.affectedRows || 0;
+};
+
+const updateRangeRecurringJobs = async (
+  executor,
+  bookingId,
+  rangeStart,
+  rangeEnd,
+  supervisorId,
+  teamJson
+) => {
+  if (!bookingId || !rangeStart || !rangeEnd) return 0;
+
+  const [result] = await executor.query(
+    `
+    UPDATE jobs
+    SET supervisor_id = ?, team = ?, updated_at = NOW()
+    WHERE booking_id = ?
+      AND start_date IS NOT NULL
+      AND DATE(start_date) BETWEEN DATE(?) AND DATE(?)
+    `,
+    [supervisorId, teamJson, bookingId, rangeStart, rangeEnd]
+  );
+
+  return result?.affectedRows || 0;
+};
 // GET /api/jobs → from MySQL
 router.get("/", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
   try {
-    let where = "";
-    let params = [];
+    const conditions = [];
+    const params = [];
+    const scope = String(req.query.scope || "active").toLowerCase();
 
     // Supervisors see their jobs, technicians see jobs assigned to them
     if (req.user.role === "supervisor") {
-      where = "WHERE j.supervisor_id = ?";
+      conditions.push("j.supervisor_id = ?");
       params.push(req.user.id);
     }
 
     // technicians (later) → jobs where they are in team JSON
-   if (req.user.role === "technician") {
-  where = `
-    WHERE JSON_CONTAINS(j.team, CAST(? AS JSON))
-       OR JSON_CONTAINS(j.team, JSON_QUOTE(?))
-  `;
-  params.push(req.user.id, String(req.user.id));
-}
+    if (req.user.role === "technician") {
+      conditions.push(`(
+        JSON_CONTAINS(j.team, CAST(? AS JSON))
+        OR JSON_CONTAINS(j.team, JSON_QUOTE(?))
+      )`);
+      params.push(req.user.id, String(req.user.id));
+    }
 
+    if (scope === "summary") {
+      conditions.push(`(
+        j.status = 'COMPLETED'
+        OR (
+          j.approval_status = 'PENDING'
+          AND j.status IN ('IN_PROGRESS', 'PAUSED')
+        )
+      )`);
+    } else if (scope !== "all") {
+      // Active jobs only: Pending, Not Started, In Progress, Paused
+      conditions.push(`(
+        j.status IN ('NOT_STARTED', 'IN_PROGRESS', 'PAUSED')
+      )
+      AND NOT (
+        j.approval_status = 'PENDING'
+        AND j.status IN ('IN_PROGRESS', 'PAUSED')
+      )
+      AND NOT (
+        j.status = 'NOT_STARTED'
+        AND j.start_date IS NOT NULL
+        AND j.start_date < NOW()
+        AND (
+          YEAR(j.start_date) < YEAR(NOW())
+          OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
+        )
+      )`);
+    }
 
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
     const [rows] = await pool.query(`
       SELECT
@@ -128,7 +204,10 @@ router.get("/", auth, allowRoles("admin", "supervisor", "technician"), async (re
         -- Company (if corporate / RWA)
         co.id   AS company_id,
         co.code AS company_code,
-        co.type AS company_type
+        co.type AS company_type,
+        co.name AS company_name,
+        co.site AS company_site
+
 
       FROM jobs j
       LEFT JOIN users u
@@ -166,13 +245,15 @@ router.get("/", auth, allowRoles("admin", "supervisor", "technician"), async (re
 
         service_type: job.service_type,
         title: job.sub_service,
-
         status: job.status,
         display_status: job.display_status,
         approval_status: job.approval_status,
         dueDate: job.due_date,
         notes: job.notes,
         start_date: job.start_date,
+        address: job.address,
+        companyname: job.company_name,
+        site: job.company_site,
 
         company_id: job.company_id, // authoritative job company
 
@@ -341,6 +422,7 @@ router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), asy
       notes: job.notes,
       start_date: job.start_date,
       dueDate: job.due_date,
+      address: job.address,
 
       supervisor: job.supervisor_id
         ? { id: job.supervisor_id, name: job.supervisor_name }
@@ -516,7 +598,7 @@ router.patch("/:id/status", auth, async (req, res) => {
 
     // 1️⃣ read current status (lock row)
     const [[job]] = await connection.query(
-      "SELECT status, approval_status FROM jobs WHERE id = ? FOR UPDATE",
+      "SELECT status, approval_status, start_date FROM jobs WHERE id = ? FOR UPDATE",
       [jobId]
     );
 
@@ -530,12 +612,31 @@ router.patch("/:id/status", auth, async (req, res) => {
 
     console.log("STATUS TRANSITION:", currentStatus, "→", newStatus, "by", userRole);
 
+    const isLost =
+      currentStatus === "NOT_STARTED"
+      && job.start_date
+      && new Date(job.start_date) < new Date()
+      && (
+        new Date(job.start_date).getFullYear() < new Date().getFullYear()
+        || (
+          new Date(job.start_date).getFullYear() === new Date().getFullYear()
+          && new Date(job.start_date).getMonth() < new Date().getMonth()
+        )
+      );
+
+    if (newStatus === "IN_PROGRESS" && (currentStatus === "CANCELED" || isLost)) {
+      await connection.rollback();
+      return res.status(400).json({
+        error: "Cannot start a canceled or lost job"
+      });
+    }
+
     // 2️⃣ allowed transitions (global rules)
     const allowedTransitions = {
       CREATED: [],
       NOT_STARTED: ["IN_PROGRESS", "CANCELED"],
       IN_PROGRESS: ["PAUSED", "COMPLETED", "CANCELED"],
-      PAUSED: ["IN_PROGRESS", "CANCELED"],
+      PAUSED: ["IN_PROGRESS", "COMPLETED", "CANCELED"],
       COMPLETED: [],
       CANCELED: []
     };
@@ -551,8 +652,6 @@ router.patch("/:id/status", auth, async (req, res) => {
     if (userRole === "technician") {
       const technicianAllowed = {
         NOT_STARTED: ["IN_PROGRESS"],
-        IN_PROGRESS: ["PAUSED"],
-        PAUSED: ["IN_PROGRESS"]
       };
 
       if (!technicianAllowed[currentStatus]?.includes(newStatus)) {
@@ -572,10 +671,10 @@ router.patch("/:id/status", auth, async (req, res) => {
 
     // 4️⃣ update job status
     if (newStatus === "COMPLETED") {
-      if (currentApproval !== "PENDING") {
+      if (userRole === "technician") {
         await connection.rollback();
-        return res.status(400).json({
-          error: "Job must be submitted for approval before completion"
+        return res.status(403).json({
+          error: "Technician not allowed to complete jobs"
         });
       }
 
@@ -719,12 +818,278 @@ router.patch(
 
 
 // create jobs from the booking form
-router.post("/", auth, allowRoles("admin"), createBooking);
+router.post("/", auth, allowRoles("admin", "supervisor"), createBooking);
+
+// Reassign a recurring job and propagate to future occurrences
+router.post(
+  "/:jobId/assign-recurring",
+  auth,
+  allowRoles("admin", "supervisor"),
+  async (req, res) => {
+    const { jobId } = req.params;
+    const { supervisorId, technicianIds } = req.body;
+    const created_by_user_id = req.user?.id;
+
+    if (!isValidJobId(jobId)) {
+      return res.status(400).json({ error: "Invalid job ID" });
+    }
+
+    if (!supervisorId) {
+      return res.status(400).json({ error: "Supervisor is required" });
+    }
+
+    const normalizedTechIds = Array.isArray(technicianIds)
+      ? technicianIds.map(id => Number(id)).filter(Boolean)
+      : [];
+    const teamJson = JSON.stringify(normalizedTechIds);
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [[job]] = await connection.query(
+        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        [jobId]
+      );
+
+      if (!job) {
+        await connection.rollback();
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (req.user.role === "supervisor") {
+        const currentSupervisorId = job.supervisor_id ? Number(job.supervisor_id) : null;
+        if (currentSupervisorId && currentSupervisorId !== Number(req.user.id)) {
+          await connection.rollback();
+          return res.status(403).json({ error: "Not allowed to reassign this job" });
+        }
+      }
+
+      if (job.status === "CREATED") {
+        await connection.query(
+          `UPDATE jobs
+           SET status = 'NOT_STARTED',
+               supervisor_id = ?,
+               team = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [supervisorId, teamJson, jobId]
+        );
+      } else {
+        await connection.query(
+          `UPDATE jobs
+           SET supervisor_id = ?,
+               team = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [supervisorId, teamJson, jobId]
+        );
+      }
+
+      // Update recurring rule defaults for future occurrences
+      if (job.booking_id) {
+        await connection.query(
+          `UPDATE recurring_rules
+           SET supervisor_id = ?, team = ?
+           WHERE booking_id = ?`,
+          [supervisorId, teamJson, job.booking_id]
+        );
+      }
+
+      // Propagate to future jobs only
+      const updatedFuture = await updateFutureRecurringJobs(
+        connection,
+        job.booking_id,
+        job.start_date,
+        supervisorId,
+        teamJson
+      );
+
+      await connection.query(
+        `INSERT INTO job_history
+         (id, job_id, action, message, metadata, created_by_user_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          uuid(),
+          jobId,
+          "ASSIGNED",
+          "Recurring assignment updated",
+          JSON.stringify({
+            supervisorId,
+            technicianIds: normalizedTechIds,
+            propagatedToFuture: updatedFuture
+          }),
+          created_by_user_id,
+        ]
+      );
+
+      await connection.commit();
+
+      res.json({
+        success: true,
+        updated_future_jobs: updatedFuture,
+      });
+    } catch (err) {
+      await connection.rollback();
+      console.error("Recurring assignment failed:", err);
+      res.status(500).json({ error: "Failed to update recurring assignment" });
+    } finally {
+      connection.release();
+    }
+  }
+);
+
+// Reassign a job with scope (current, range, future)
+router.post(
+  "/:jobId/reassign",
+  auth,
+  allowRoles("admin", "supervisor"),
+  async (req, res) => {
+    const { jobId } = req.params;
+    const { supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
+    const created_by_user_id = req.user?.id;
+
+    if (!isValidJobId(jobId)) {
+      return res.status(400).json({ error: "Invalid job ID" });
+    }
+
+    if (!supervisorId) {
+      return res.status(400).json({ error: "Supervisor is required" });
+    }
+
+    const normalizedTechIds = Array.isArray(technicianIds)
+      ? technicianIds.map(id => Number(id)).filter(Boolean)
+      : [];
+    const teamJson = JSON.stringify(normalizedTechIds);
+
+    const selectedScope = scope || "current";
+    const allowedScopes = new Set(["current", "range", "future"]);
+    if (!allowedScopes.has(selectedScope)) {
+      return res.status(400).json({ error: "Invalid scope" });
+    }
+
+    if (selectedScope === "range") {
+      if (!rangeStart || !rangeEnd) {
+        return res.status(400).json({ error: "rangeStart and rangeEnd are required" });
+      }
+      if (new Date(rangeEnd) < new Date(rangeStart)) {
+        return res.status(400).json({ error: "rangeEnd cannot be before rangeStart" });
+      }
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [[job]] = await connection.query(
+        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        [jobId]
+      );
+
+      if (!job) {
+        await connection.rollback();
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (req.user.role === "supervisor") {
+        const currentSupervisorId = job.supervisor_id ? Number(job.supervisor_id) : null;
+        if (currentSupervisorId && currentSupervisorId !== Number(req.user.id)) {
+          await connection.rollback();
+          return res.status(403).json({ error: "Not allowed to reassign this job" });
+        }
+      }
+
+      if ((selectedScope === "range" || selectedScope === "future") && !job.booking_id) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Job is not part of a recurring series" });
+      }
+
+      if ((selectedScope === "range" || selectedScope === "future") && !job.start_date) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Job start_date is required for range/future scope" });
+      }
+
+      let updatedCount = 0;
+
+      if (selectedScope === "current") {
+        await connection.query(
+          `UPDATE jobs
+           SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
+               supervisor_id = ?,
+               team = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [supervisorId, teamJson, jobId]
+        );
+        updatedCount = 1;
+      } else if (selectedScope === "range") {
+        const effectiveStart = new Date(rangeStart) < new Date(job.start_date)
+          ? job.start_date
+          : rangeStart;
+        updatedCount = await updateRangeRecurringJobs(
+          connection,
+          job.booking_id,
+          effectiveStart,
+          rangeEnd,
+          supervisorId,
+          teamJson
+        );
+      } else if (selectedScope === "future") {
+        updatedCount = await updateFutureRecurringJobs(
+          connection,
+          job.booking_id,
+          job.start_date,
+          supervisorId,
+          teamJson
+        );
+      }
+
+      if (job.booking_id) {
+        await connection.query(
+          `UPDATE recurring_rules
+           SET supervisor_id = ?, team = ?
+           WHERE booking_id = ?`,
+          [supervisorId, teamJson, job.booking_id]
+        );
+      }
+
+      await connection.query(
+        `INSERT INTO job_history
+         (id, job_id, action, message, metadata, created_by_user_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          uuid(),
+          jobId,
+          "ASSIGNED",
+          "Assignment updated via scope",
+          JSON.stringify({
+            scope: selectedScope,
+            supervisorId,
+            technicianIds: normalizedTechIds,
+            updatedCount
+          }),
+          created_by_user_id,
+        ]
+      );
+
+      await connection.commit();
+      res.json({ success: true, updatedCount });
+    } catch (err) {
+      await connection.rollback();
+      console.error("Scoped reassignment failed:", err);
+      res.status(500).json({ error: "Failed to update assignment" });
+    } finally {
+      connection.release();
+    }
+  }
+);
 
 
 // POST /api/jobs/assign
 router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res) => {
-  const { jobIds, supervisorId, technicianIds } = req.body;
+  const { jobIds, supervisorId, technicianIds, scope, rangeStart, rangeEnd } = req.body;
   const created_by_user_id = req.user?.id;
 
   if (!jobIds?.length) {
@@ -736,6 +1101,141 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
   }
 
   const connection = await pool.getConnection();
+
+  if (scope) {
+    const selectedScope = scope;
+    const allowedScopes = new Set(["current", "range", "future"]);
+    if (!allowedScopes.has(selectedScope)) {
+      return res.status(400).json({ error: "Invalid scope" });
+    }
+
+    if (jobIds?.length !== 1) {
+      return res.status(400).json({ error: "Scoped reassignment requires a single jobId" });
+    }
+
+    if (selectedScope === "range") {
+      if (!rangeStart || !rangeEnd) {
+        return res.status(400).json({ error: "rangeStart and rangeEnd are required" });
+      }
+      if (new Date(rangeEnd) < new Date(rangeStart)) {
+        return res.status(400).json({ error: "rangeEnd cannot be before rangeStart" });
+      }
+    }
+
+    const normalizedTechIds = Array.isArray(technicianIds)
+      ? technicianIds.map(id => Number(id)).filter(Boolean)
+      : [];
+    const teamJson = JSON.stringify(normalizedTechIds);
+
+    try {
+      await connection.beginTransaction();
+
+      const [[job]] = await connection.query(
+        "SELECT id, booking_id, start_date, status, supervisor_id FROM jobs WHERE id = ? FOR UPDATE",
+        [jobIds[0]]
+      );
+
+      if (!job) {
+        await connection.rollback();
+        return res.status(404).json({ error: "Job not found" });
+      }
+
+      if (req.user.role === "supervisor") {
+        const currentSupervisorId = job.supervisor_id ? Number(job.supervisor_id) : null;
+        if (currentSupervisorId && currentSupervisorId !== Number(req.user.id)) {
+          await connection.rollback();
+          return res.status(403).json({ error: "Not allowed to reassign this job" });
+        }
+      }
+
+      if ((selectedScope === "range" || selectedScope === "future") && !job.booking_id) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Job is not part of a recurring series" });
+      }
+
+      if ((selectedScope === "range" || selectedScope === "future") && !job.start_date) {
+        await connection.rollback();
+        return res.status(400).json({ error: "Job start_date is required for range/future scope" });
+      }
+
+      if (selectedScope === "range" && new Date(rangeEnd) < new Date(job.start_date)) {
+        await connection.rollback();
+        return res.status(400).json({ error: "rangeEnd cannot be before current job date" });
+      }
+
+      let updatedCount = 0;
+
+      if (selectedScope === "current") {
+        await connection.query(
+          `UPDATE jobs
+           SET status = IF(status = 'CREATED', 'NOT_STARTED', status),
+               supervisor_id = ?,
+               team = ?,
+               updated_at = NOW()
+           WHERE id = ?`,
+          [supervisorId, teamJson, job.id]
+        );
+        updatedCount = 1;
+      } else if (selectedScope === "range") {
+        const effectiveStart = new Date(rangeStart) < new Date(job.start_date)
+          ? job.start_date
+          : rangeStart;
+        updatedCount = await updateRangeRecurringJobs(
+          connection,
+          job.booking_id,
+          effectiveStart,
+          rangeEnd,
+          supervisorId,
+          teamJson
+        );
+      } else if (selectedScope === "future") {
+        updatedCount = await updateFutureRecurringJobs(
+          connection,
+          job.booking_id,
+          job.start_date,
+          supervisorId,
+          teamJson
+        );
+      }
+
+      if (job.booking_id) {
+        await connection.query(
+          `UPDATE recurring_rules
+           SET supervisor_id = ?, team = ?
+           WHERE booking_id = ?`,
+          [supervisorId, teamJson, job.booking_id]
+        );
+      }
+
+      await connection.query(
+        `INSERT INTO job_history
+         (id, job_id, action, message, metadata, created_by_user_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          uuid(),
+          job.id,
+          "ASSIGNED",
+          "Assignment updated via scope",
+          JSON.stringify({
+            scope: selectedScope,
+            supervisorId,
+            technicianIds: normalizedTechIds,
+            updatedCount
+          }),
+          created_by_user_id,
+        ]
+      );
+
+      await connection.commit();
+      return res.json({ success: true, updatedCount });
+    } catch (err) {
+      await connection.rollback();
+      console.error("Scoped assignment failed:", err);
+      return res.status(500).json({ error: "Failed to assign jobs" });
+    } finally {
+      connection.release();
+    }
+  }
 
   try {
     await connection.beginTransaction();
@@ -768,7 +1268,7 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
 
       // current job
       const [[job]] = await connection.query(
-        "SELECT supervisor_id, status FROM jobs WHERE id = ?",
+        "SELECT supervisor_id, status, booking_id FROM jobs WHERE id = ?",
         [jobId]
       );
 
@@ -808,6 +1308,15 @@ router.post("/assign", auth, allowRoles("admin", "supervisor"), async (req, res)
          updated_at = NOW()
      WHERE id = ?`,
           [supervisorId, JSON.stringify(normalizedTechIds), jobId]
+        );
+      }
+
+      if (job.booking_id) {
+        await connection.query(
+          `UPDATE recurring_rules
+           SET supervisor_id = ?, team = ?
+           WHERE booking_id = ?`,
+          [supervisorId, JSON.stringify(normalizedTechIds), job.booking_id]
         );
       }
 

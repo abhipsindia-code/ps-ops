@@ -101,6 +101,7 @@ export default function Signup() {
                     <form onSubmit={handleSendOtp}>
                         <input
                             name="name"
+                            type="text"
                             placeholder="Full Name"
                             value={form.name}
                             onChange={handleChange}
@@ -110,6 +111,7 @@ export default function Signup() {
                         <input
                             name="phone"
                             placeholder="Mobile Number"
+                            type="tel"
                             value={form.phone}
                             onChange={handleChange}
                             required
@@ -135,6 +137,7 @@ export default function Signup() {
 
                         <input
                             name="designation"
+                            type="text"
                             placeholder="Designation (e.g. Field Technician)"
                             value={form.designation}
                             onChange={handleChange}

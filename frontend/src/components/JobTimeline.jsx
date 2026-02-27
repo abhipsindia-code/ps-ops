@@ -1,58 +1,142 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./jobrow.css";
 import { API_BASE } from "../api";
 
 export default function JobTimeline({ history = [] }) {
   const [activeImage, setActiveImage] = useState(null);
-  const [imageMap, setImageMap] = useState({});
-
+  const [attachmentMap, setAttachmentMap] = useState({});
+  const attachmentUrlRef = useRef({});
   const token = localStorage.getItem("token");
 
-  const actionIcon = (action) => {
+  const actionMeta = (action) => {
     switch (action) {
       case "CREATED":
-        return "🆕";
+        return { icon: "\u2728", label: "Created", className: "created" };
       case "COMMENT":
-        return "💬";
+        return { icon: "\uD83D\uDCAC", label: "Comment", className: "comment" };
       case "ASSIGNED":
-        return "👤";
+        return { icon: "\uD83D\uDC64", label: "Assigned", className: "assigned" };
+      case "STATUS_CHANGED":
+        return { icon: "\u23F1", label: "Status", className: "status" };
       default:
-        return "📌";
+        return { icon: "\uD83D\uDCCC", label: "Update", className: "default" };
     }
   };
 
-  // 🔐 Fetch protected images with token
+  async function fetchAttachment(att) {
+    if (attachmentUrlRef.current[att.id]) {
+      return attachmentUrlRef.current[att.id];
+    }
+
+    if (!token) {
+      throw new Error("Missing auth token");
+    }
+
+    const res = await fetch(`${API_BASE}/api/attachments/${att.id}/view`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!res.ok) {
+      throw new Error("Failed to fetch attachment");
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    attachmentUrlRef.current[att.id] = url;
+
+    setAttachmentMap((prev) => ({
+      ...prev,
+      [att.id]: {
+        url,
+        fileType: att.file_type,
+        fileName: att.file_name,
+      },
+    }));
+
+    return url;
+  }
+
+  async function handleDownload(att) {
+    try {
+      let url = attachmentUrlRef.current[att.id];
+      let revokeAfter = false;
+
+      if (!url) {
+        if (!token) throw new Error("Missing auth token");
+        const res = await fetch(`${API_BASE}/api/attachments/${att.id}/view`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) throw new Error("Failed to fetch attachment");
+        const blob = await res.blob();
+        url = URL.createObjectURL(blob);
+        revokeAfter = true;
+      }
+
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = att.file_name || "attachment";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+
+      if (revokeAfter) {
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error("Failed to download attachment", err);
+    }
+  }
+
   useEffect(() => {
-    async function loadImages() {
-      const newImageMap = {};
+    let cancelled = false;
 
-      for (const item of history) {
+    async function prefetchMedia() {
+      const toLoad = [];
+
+      history.forEach((item) => {
         if (item.attachments?.length > 0) {
-          for (const att of item.attachments) {
-            if (att.type === "IMAGE") {
-              const res = await fetch(
-                `${API_BASE}/api/attachments/${att.id}/view`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                  },
-                }
-              );
-
-              if (res.ok) {
-                const blob = await res.blob();
-                newImageMap[att.id] = URL.createObjectURL(blob);
-              }
+          item.attachments.forEach((att) => {
+            const isAudio = (att.file_type || "").startsWith("audio/");
+            if (att.type === "IMAGE" || isAudio) {
+              toLoad.push(att);
             }
+          });
+        }
+      });
+
+      for (const att of toLoad) {
+        if (attachmentUrlRef.current[att.id]) continue;
+        try {
+          await fetchAttachment(att);
+        } catch (err) {
+          if (!cancelled) {
+            console.error("Failed to load attachment", err);
           }
         }
       }
-
-      setImageMap(newImageMap);
     }
 
-    if (history.length) loadImages();
-  }, [history]);
+    if (history.length) {
+      prefetchMedia();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [history, token]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(attachmentUrlRef.current).forEach((url) => {
+        URL.revokeObjectURL(url);
+      });
+      attachmentUrlRef.current = {};
+    };
+  }, []);
 
   return (
     <>
@@ -62,13 +146,23 @@ export default function JobTimeline({ history = [] }) {
         {history.map((item) => (
           <div key={item.id} className="timeline-item">
             <div className="timeline-icon">
-              {actionIcon(item.action)}
+              {(() => {
+                const meta = actionMeta(item.action);
+                return (
+                  <span
+                    className={`timeline-icon-badge timeline-icon-${meta.className}`}
+                    title={meta.label}
+                  >
+                    {meta.icon}
+                  </span>
+                );
+              })()}
             </div>
 
             <div className="timeline-content">
               <div className="timeline-meta">
-                <strong>{item.created_by || "System"}</strong>
-                <span>
+                <strong className="timeline-author">{item.created_by || "System"}</strong>
+                <span className="timeline-date">
                   {new Date(item.created_at).toLocaleString("en-IN", {
                     dateStyle: "medium",
                     timeStyle: "short",
@@ -82,29 +176,84 @@ export default function JobTimeline({ history = [] }) {
 
               {item.attachments?.length > 0 && (
                 <div className="timeline-attachments">
-                  {item.attachments.map((att) =>
-                    att.type === "IMAGE" ? (
-                      <img
-                        key={att.id}
-                        src={imageMap[att.id]}
-                        alt={att.file_name}
-                        className="attachment-thumb"
-                        onClick={() =>
-                          setActiveImage(imageMap[att.id])
-                        }
-                      />
-                    ) : (
-                      <a
-                        key={att.id}
-                        href={`${API_BASE}/api/attachments/${att.id}/view`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="attachment-file"
-                      >
-                        📄 {att.file_name}
-                      </a>
-                    )
-                  )}
+                  {item.attachments.map((att) => {
+                    const isAudio = (att.file_type || "").startsWith("audio/");
+                    const fileInfo = attachmentMap[att.id];
+
+                    if (att.type === "IMAGE") {
+                      if (!fileInfo?.url) {
+                        return (
+                          <button
+                            key={att.id}
+                            type="button"
+                            className="attachment-load-btn"
+                            onClick={() => fetchAttachment(att)}
+                          >
+                            Load image
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <img
+                          key={att.id}
+                          src={fileInfo.url}
+                          alt={att.file_name}
+                          className="attachment-thumb"
+                          onClick={() => setActiveImage(fileInfo.url)}
+                        />
+                      );
+                    }
+
+                    if (isAudio) {
+                      return (
+                        <div key={att.id} className="attachment-audio">
+                          {fileInfo?.url ? (
+                            <audio controls src={fileInfo.url} />
+                          ) : (
+                            <button
+                              type="button"
+                              className="attachment-load-btn"
+                              onClick={() => fetchAttachment(att)}
+                            >
+                              Load voice note
+                            </button>
+                          )}
+                          <div className="attachment-file-row">
+                            <div className="attachment-file-name">
+                              {att.file_name || "Voice note"}
+                            </div>
+                            <div className="attachment-file-actions">
+                              <button
+                                type="button"
+                                className="attachment-download-btn"
+                                onClick={() => handleDownload(att)}
+                              >
+                                Download
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={att.id} className="attachment-file-row">
+                        <div className="attachment-file-name">
+                          {att.file_name || "Attachment"}
+                        </div>
+                        <div className="attachment-file-actions">
+                          <button
+                            type="button"
+                            className="attachment-download-btn"
+                            onClick={() => handleDownload(att)}
+                          >
+                            Download
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

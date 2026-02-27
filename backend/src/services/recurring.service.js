@@ -29,7 +29,9 @@ function normalizeRecurrenceInput(recurrence, fallbackStartDate) {
 
   let dayOfWeek = recurrence.day_of_week;
   let dayOfMonth = recurrence.day_of_month;
+  let weekOfMonth = recurrence.week_of_month;
   let daysOfWeek = normalizeDaysOfWeek(recurrence.days_of_week);
+  let weeksOfMonth = normalizeWeeksOfMonth(recurrence.week_of_month ?? recurrence.week_of_months);
 
   if (frequency === "WEEKLY") {
     const fallbackDow = (dayOfWeek === undefined || dayOfWeek === null || dayOfWeek === "")
@@ -42,18 +44,78 @@ function normalizeRecurrenceInput(recurrence, fallbackStartDate) {
     dayOfWeek = daysOfWeek[0];
     dayOfMonth = null;
   } else if (frequency === "MONTHLY") {
-    if (dayOfMonth === undefined || dayOfMonth === null || dayOfMonth === "") {
-      dayOfMonth = toUtcDateOnly(startDate).getUTCDate();
+    const hasWeekOfMonthInput =
+      recurrence.week_of_month !== undefined &&
+      recurrence.week_of_month !== null &&
+      recurrence.week_of_month !== "";
+    const hasWeekOfMonthsInput =
+      recurrence.week_of_months !== undefined &&
+      recurrence.week_of_months !== null &&
+      recurrence.week_of_months !== "";
+    const hasWeekOfMonth = hasWeekOfMonthInput || hasWeekOfMonthsInput;
+    const hasDayOfMonth =
+      dayOfMonth !== undefined && dayOfMonth !== null && dayOfMonth !== "";
+    const startDateObj = toUtcDateOnly(startDate);
+    const fallbackWeekOfMonth = startDateObj
+      ? Math.floor((startDateObj.getUTCDate() - 1) / 7) + 1
+      : 1;
+    const fallbackDow = startDateObj ? startDateObj.getUTCDay() : 1;
+
+    if (hasWeekOfMonth && !hasDayOfMonth) {
+      weeksOfMonth = normalizeWeeksOfMonth(
+        recurrence.week_of_month ?? recurrence.week_of_months,
+        fallbackWeekOfMonth
+      );
+      const rawDays = recurrence.days_of_week ?? recurrence.day_of_week;
+      daysOfWeek = normalizeDaysOfWeek(rawDays, fallbackDow);
+
+      if (!weeksOfMonth || weeksOfMonth.length === 0) {
+        throw new Error("recurrence.week_of_month must include at least one week");
+      }
+      if (!daysOfWeek || daysOfWeek.length === 0) {
+        throw new Error("recurrence.days_of_week must include at least one day");
+      }
+
+      const rules = [];
+      for (const wom of weeksOfMonth) {
+        if (![1, 2, 3, 4, 5, -1].includes(wom)) {
+          throw new Error("recurrence.week_of_month must be 1-5 or -1 for last");
+        }
+        for (const dow of daysOfWeek) {
+          if (!Number.isInteger(dow) || dow < 0 || dow > 6) {
+            throw new Error("recurrence.day_of_week must be between 0 and 6");
+          }
+          rules.push({
+            frequency,
+            interval_value: intervalValue,
+            day_of_week: dow,
+            days_of_week: null,
+            day_of_month: null,
+            week_of_month: wom,
+            start_date: startDate,
+            end_date: endDate,
+          });
+        }
+      }
+
+      return rules.length === 1 ? rules[0] : rules;
+    } else {
+      if (dayOfMonth === undefined || dayOfMonth === null || dayOfMonth === "") {
+        dayOfMonth = toUtcDateOnly(startDate).getUTCDate();
+      }
+      dayOfMonth = Number(dayOfMonth);
+      if (!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) {
+        throw new Error("recurrence.day_of_month must be between 1 and 31");
+      }
+      dayOfWeek = null;
+      daysOfWeek = null;
+      weekOfMonth = null;
     }
-    if (dayOfMonth < 1 || dayOfMonth > 31) {
-      throw new Error("recurrence.day_of_month must be between 1 and 31");
-    }
-    dayOfWeek = null;
-    daysOfWeek = null;
   } else {
     dayOfWeek = null;
     dayOfMonth = null;
     daysOfWeek = null;
+    weekOfMonth = null;
   }
 
   return {
@@ -62,6 +124,7 @@ function normalizeRecurrenceInput(recurrence, fallbackStartDate) {
     day_of_week: dayOfWeek,
     days_of_week: daysOfWeek,
     day_of_month: dayOfMonth,
+    week_of_month: weekOfMonth,
     start_date: startDate,
     end_date: endDate,
   };
@@ -120,8 +183,11 @@ async function generateRecurringJobs(pool, options = {}) {
         r.frequency,
         r.interval_value,
         r.day_of_week,
+        r.week_of_month,
         r.day_of_month,
         r.days_of_week,
+        r.supervisor_id,
+        r.team,
         r.start_date AS rule_start_date,
         r.end_date AS rule_end_date,
         r.last_generated_until,
@@ -236,6 +302,10 @@ async function processRule(connection, rule, windowStart, windowEnd) {
     );
     let sequenceValue = seqRow.value;
 
+    const supervisorId = rule.supervisor_id || null;
+    const normalizedTeam = normalizeTeam(rule.team);
+    const teamValue = JSON.stringify(normalizedTeam);
+
     for (const job of jobsToCreate) {
       sequenceValue += 1;
       const jobId = uuid();
@@ -270,8 +340,8 @@ async function processRule(connection, rule, windowStart, windowEnd) {
           rule.service_type,
           job.sub_service,
           "NOT_STARTED",
-          null,
-          JSON.stringify([]),
+          supervisorId,
+          teamValue,
           rule.company_id || null,
           rule.contact_id || null,
           rule.created_by_user_id || null,
@@ -346,16 +416,35 @@ function getOccurrencesInWindow(rule, cursor, windowEnd, ruleStart, ruleEnd) {
     });
     occurrences.push(...weeklyOccurrences);
   } else if (rule.frequency === "MONTHLY") {
-    const targetDom = Number.isFinite(Number(rule.day_of_month))
-      ? Number(rule.day_of_month)
-      : ruleStart.getUTCDate();
-    let next = alignMonthly(ruleStart, targetDom, interval);
-    while (next < cursor) {
-      next = addMonths(next, interval, targetDom);
-    }
-    while (next <= windowLimit) {
-      occurrences.push(next);
-      next = addMonths(next, interval, targetDom);
+    const weekOfMonth = Number.isFinite(Number(rule.week_of_month))
+      ? Number(rule.week_of_month)
+      : null;
+    const dayOfWeek = Number.isFinite(Number(rule.day_of_week))
+      ? Number(rule.day_of_week)
+      : null;
+
+    if (weekOfMonth !== null && dayOfWeek !== null) {
+      const monthlyOccurrences = getMonthlyWeekdayOccurrences({
+        dayOfWeek,
+        weekOfMonth,
+        interval,
+        cursor,
+        windowLimit,
+        ruleStart,
+      });
+      occurrences.push(...monthlyOccurrences);
+    } else {
+      const targetDom = Number.isFinite(Number(rule.day_of_month))
+        ? Number(rule.day_of_month)
+        : ruleStart.getUTCDate();
+      let next = alignMonthly(ruleStart, targetDom, interval);
+      while (next < cursor) {
+        next = addMonths(next, interval, targetDom);
+      }
+      while (next <= windowLimit) {
+        occurrences.push(next);
+        next = addMonths(next, interval, targetDom);
+      }
     }
   }
 
@@ -401,6 +490,47 @@ function normalizeDaysOfWeek(value, fallbackDay) {
   return normalized;
 }
 
+function normalizeWeeksOfMonth(value, fallbackWeek) {
+  let weeks = [];
+
+  if (Array.isArray(value)) {
+    weeks = value;
+  } else if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        weeks = parsed;
+      } else if (value.includes(",")) {
+        weeks = value.split(",");
+      } else if (value.trim() !== "") {
+        weeks = [value];
+      }
+    } catch {
+      if (value.includes(",")) {
+        weeks = value.split(",");
+      } else if (value.trim() !== "") {
+        weeks = [value];
+      }
+    }
+  } else if (value !== undefined && value !== null && value !== "") {
+    weeks = [value];
+  }
+
+  const normalized = Array.from(
+    new Set(
+      weeks
+        .map(item => Number(item))
+        .filter(item => Number.isInteger(item) && (item === -1 || (item >= 1 && item <= 5)))
+    )
+  );
+
+  if (normalized.length === 0 && Number.isInteger(fallbackWeek)) {
+    return [fallbackWeek];
+  }
+
+  return normalized;
+}
+
 function getWeeklyOccurrences({ daysOfWeek, interval, cursor, windowLimit, ruleStart }) {
   if (!daysOfWeek || daysOfWeek.length === 0) return [];
   const anchorWeekStart = startOfWeekSunday(ruleStart);
@@ -426,6 +556,40 @@ function getWeeklyOccurrences({ daysOfWeek, interval, cursor, windowLimit, ruleS
   return Array.from(new Map(occurrences.map(date => [formatDate(date), date])).values());
 }
 
+function getMonthlyWeekdayOccurrences({
+  dayOfWeek,
+  weekOfMonth,
+  interval,
+  cursor,
+  windowLimit,
+  ruleStart
+}) {
+  const occurrences = [];
+  const startMonthIndex = ruleStart.getUTCFullYear() * 12 + ruleStart.getUTCMonth();
+  const cursorMonthIndex = cursor.getUTCFullYear() * 12 + cursor.getUTCMonth();
+  let offset = cursorMonthIndex - startMonthIndex;
+  if (offset < 0) offset = 0;
+  if (offset % interval !== 0) {
+    offset += interval - (offset % interval);
+  }
+
+  for (let m = offset; ; m += interval) {
+    const monthIndex = startMonthIndex + m;
+    const year = Math.floor(monthIndex / 12);
+    const month = monthIndex % 12;
+    const monthStart = new Date(Date.UTC(year, month, 1));
+    if (monthStart > windowLimit) break;
+    const candidate = getNthWeekdayOfMonth(year, month, dayOfWeek, weekOfMonth);
+    if (!candidate) continue;
+    if (candidate < ruleStart) continue;
+    if (candidate < cursor) continue;
+    if (candidate > windowLimit) break;
+    occurrences.push(candidate);
+  }
+
+  return occurrences;
+}
+
 function parseSubServices(value) {
   if (!value) return [];
   if (Array.isArray(value)) {
@@ -444,6 +608,36 @@ function parseSubServices(value) {
   } catch {
     return [];
   }
+}
+
+function normalizeTeam(value) {
+  if (!value) return [];
+  let team = [];
+
+  if (Array.isArray(value)) {
+    team = value;
+  } else if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        team = parsed;
+      } else if (value.includes(",")) {
+        team = value.split(",");
+      } else if (value.trim() !== "") {
+        team = [value];
+      }
+    } catch {
+      if (value.includes(",")) {
+        team = value.split(",");
+      } else if (value.trim() !== "") {
+        team = [value];
+      }
+    }
+  } else {
+    team = [value];
+  }
+
+  return team.map(item => Number(item)).filter(item => Number.isInteger(item) && item > 0);
 }
 
 function startOfUtcDay(date) {
@@ -524,6 +718,22 @@ function addMonths(date, months, targetDom) {
 
 function daysInMonth(year, month) {
   return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+function getNthWeekdayOfMonth(year, month, dayOfWeek, weekOfMonth) {
+  if (weekOfMonth === -1) {
+    const lastDay = new Date(Date.UTC(year, month + 1, 0));
+    const diff = (lastDay.getUTCDay() - dayOfWeek + 7) % 7;
+    return addDays(lastDay, -diff);
+  }
+
+  const firstDay = new Date(Date.UTC(year, month, 1));
+  const firstDow = firstDay.getUTCDay();
+  const offset = (dayOfWeek - firstDow + 7) % 7;
+  const day = 1 + offset + (weekOfMonth - 1) * 7;
+  const daysIn = daysInMonth(year, month);
+  if (day > daysIn) return null;
+  return new Date(Date.UTC(year, month, day));
 }
 
 function msUntilNextRun({ hour = 2, minute = 0 } = {}) {

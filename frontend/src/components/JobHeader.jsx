@@ -28,7 +28,10 @@ export default function JobHeader({ job, setIsAssignOpen }) {
       ? job.subServices.join(", ")
       : "") ||
     "Service Job";
-  const displayStatus = job.display_status || status || "";
+  
+  
+  
+    const displayStatus = job.display_status || status || "";
 
   return (
     <div className="job-header">

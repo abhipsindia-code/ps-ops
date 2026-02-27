@@ -3,7 +3,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f7f8fa;
+  background: linear-gradient(117deg,#bd2727,#c84b4b,#008dd2);
+  background-size: 180% 180%;
+  animation: gradient-animation 21s ease infinite;
+}
+
+
+
+@keyframes gradient-animation {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }
 
 .auth-card {
@@ -22,7 +38,11 @@
 }
 
 .auth-card input[type="username"],
-.auth-card input[type="password"] {
+.auth-card input[type="password"],
+.auth-card input[type="email"],
+.auth-card input[type="tel"], 
+.auth-card input[type="text"]
+{
   width: 100%;
   padding: 10px 12px;
   margin-bottom: 12px;

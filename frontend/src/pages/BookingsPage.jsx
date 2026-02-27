@@ -18,6 +18,11 @@ export default function BookingsPage() {
   const navigate = useNavigate();
   const role = localStorage.getItem("role");
   const [bookings, setBookings] = useState([]);
+  const [filters, setFilters] = useState({
+    status: "",
+    startDate: "",
+    endDate: "",
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -51,7 +56,48 @@ export default function BookingsPage() {
     };
   }, []);
 
-  const totalBookings = useMemo(() => bookings.length, [bookings.length]);
+  const statusOptions = [
+    { value: "", label: "All statuses" },
+    { value: "CREATED", label: "Created" },
+    { value: "NOT_STARTED", label: "Not Started" },
+    { value: "PENDING", label: "Pending" },
+    { value: "IN_PROGRESS", label: "In Progress" },
+    { value: "PAUSED", label: "Paused" },
+    { value: "COMPLETED", label: "Completed" },
+    { value: "CANCELED", label: "Canceled" },
+  ];
+
+  const hasFilters = Boolean(filters.status || filters.startDate || filters.endDate);
+
+  const filteredBookings = useMemo(() => {
+    if (!hasFilters) return bookings;
+    const start = filters.startDate ? new Date(`${filters.startDate}T00:00:00`) : null;
+    const end = filters.endDate ? new Date(`${filters.endDate}T23:59:59.999`) : null;
+
+    const matchesJob = (job) => {
+      if (filters.status && job.status !== filters.status) return false;
+      if (!start && !end) return true;
+      if (!job.start_date) return false;
+      const jobDate = new Date(job.start_date);
+      if (Number.isNaN(jobDate.getTime())) return false;
+      if (start && jobDate < start) return false;
+      if (end && jobDate > end) return false;
+      return true;
+    };
+
+    return bookings.reduce((acc, booking) => {
+      const jobs = Array.isArray(booking.jobs) ? booking.jobs : [];
+      const filteredJobs = jobs.filter(matchesJob);
+      if (filteredJobs.length === 0) return acc;
+      acc.push({ ...booking, jobs: filteredJobs });
+      return acc;
+    }, []);
+  }, [bookings, filters, hasFilters]);
+
+  const totalBookings = useMemo(
+    () => filteredBookings.length,
+    [filteredBookings.length]
+  );
 
   if (loading) {
     return <div className="bookings-page">Loading bookings...</div>;
@@ -70,8 +116,50 @@ export default function BookingsPage() {
         </div>
       </div>
 
+      <div className="bookings-filters">
+        <div className="bookings-filter-field">
+          <label>Status</label>
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value }))}
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt.value || "all"} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="bookings-filter-field">
+          <label>Start Date</label>
+          <input
+            type="date"
+            value={filters.startDate}
+            onChange={(e) => setFilters((prev) => ({ ...prev, startDate: e.target.value }))}
+          />
+        </div>
+        <div className="bookings-filter-field">
+          <label>End Date</label>
+          <input
+            type="date"
+            value={filters.endDate}
+            onChange={(e) => setFilters((prev) => ({ ...prev, endDate: e.target.value }))}
+          />
+        </div>
+        <button
+          type="button"
+          className="bookings-filter-reset"
+          onClick={() => setFilters({ status: "", startDate: "", endDate: "" })}
+        >
+          Reset
+        </button>
+      </div>
+
       <div className="bookings-list">
-        {bookings.map(booking => (
+        {filteredBookings.length === 0 && (
+          <div className="booking-job-empty">No bookings match the current filters.</div>
+        )}
+        {filteredBookings.map(booking => (
           <div key={booking.id} className="booking-list-card">
             <div className="booking-card-top">
               <div>
