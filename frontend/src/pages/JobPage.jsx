@@ -17,6 +17,7 @@ export default function JobPage() {
   const [isAssignOpen, setIsAssignOpen] = useState(false);
   const [job, setJob] = useState(null);
   const [history, setHistory] = useState([]);
+  const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [dateForm, setDateForm] = useState({ start_date: "", end_date: "" });
@@ -24,7 +25,32 @@ export default function JobPage() {
   const [savingDates, setSavingDates] = useState(false);
   const role = localStorage.getItem("role");
   const canAssign = role !== "technician";
+  const [openVisitMenu, setOpenVisitMenu] = useState(null);
 
+  // Visit scheduling state
+  const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
+  const [visitDate, setVisitDate] = useState("");
+  const [visitTechs, setVisitTechs] = useState([]);
+  const [savingVisit, setSavingVisit] = useState(false);
+
+  //visit reschedule/change tech state
+  const [editVisit, setEditVisit] = useState(null);
+  const [isEditVisitModalOpen, setIsEditVisitModalOpen] = useState(false);
+
+  const [rescheduleVisit, setRescheduleVisit] = useState(null);
+  const [isRescheduleModalOpen, setIsRescheduleModalOpen] = useState(false);
+
+
+  // ✅ Fetch job visits (reusable)
+  const loadVisits = async () => {
+    try {
+      const res = await apiFetch(`/api/visits/jobs/${jobId}/visits`);
+      const data = await res.json();
+      setVisits(Array.isArray(data) ? data : data.visits || []);
+    } catch (err) {
+      console.error("Failed to load visits", err);
+    }
+  };
 
   // ✅ Fetch job history (reusable)
   const reloadHistory = async () => {
@@ -40,18 +66,19 @@ export default function JobPage() {
     }
   };
 
+
+
   // ✅ Initial load
   useEffect(() => {
-    async function load() {
+    async function loadJob() {
       try {
         const jobRes = await apiFetch(`/api/jobs/${jobId}`);
 
-        if (!jobRes.ok) {
-          throw new Error("Job fetch failed");
-        }
+        if (!jobRes.ok) throw new Error("Job fetch failed");
 
         const jobData = await jobRes.json();
         setJob(jobData);
+
         setDateForm({
           start_date: jobData.start_date
             ? new Date(jobData.start_date).toISOString().slice(0, 10)
@@ -60,9 +87,11 @@ export default function JobPage() {
             ? new Date(jobData.dueDate).toISOString().slice(0, 10)
             : "",
         });
+
         setScheduleType(jobData.dueDate ? "range" : "single");
 
         await reloadHistory();
+
       } catch (err) {
         console.error("Failed to load job", err);
       } finally {
@@ -70,9 +99,16 @@ export default function JobPage() {
       }
     }
 
-    load();
+    loadJob();
+  }, [jobId]);
+  // ✅ Load visits when jobId changes
+  useEffect(() => {
+    if (!jobId) return;
+    loadVisits();
   }, [jobId]);
 
+
+  // Early returns
   if (loading) return <div>Loading…</div>;
   if (!job) return <div>Job not found</div>;
   const jobstatus = job.status;
@@ -82,6 +118,137 @@ export default function JobPage() {
   const isCanceled = jobstatus === "CANCELED";
   const isLost = displayStatus === "LOST";
   const canStart = jobstatus === "NOT_STARTED" && !isCanceled && !isLost;
+
+  const token = localStorage.getItem("token");
+
+  let userId = null;
+
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      userId = payload.id;
+    } catch (err) {
+      console.error("Token parse failed", err);
+    }
+  }
+  const today = new Date().toLocaleDateString("en-CA");
+
+  console.log("userId from token:", userId);
+  console.log("ROLE:", role);
+  console.log("USER ID:", userId);
+  console.log("TODAY:", today);
+  console.log("VISITS:", visits);
+
+
+
+  const visibleVisits =
+    role === "technician"
+      ? visits.filter((v) => {
+
+        const assigned =
+          v.technicians?.some((t) => Number(t.id) === Number(userId));
+
+        const visitDate = new Date(v.scheduled_date).toLocaleDateString("en-CA");
+
+        return assigned && visitDate === today;
+      })
+      : visits;
+
+  console.log("VISIBLE VISITS:", visibleVisits);
+
+  //visits status flow: SCHEDULED -> IN_PROGRESS -> AWAITING_APPROVAL -> COMPLETED
+  async function startVisit(visitId) {
+    try {
+
+      const res = await apiFetch(`/api/visits/${visitId}/start`, {
+        method: "PATCH"
+      });
+
+      if (!res.ok) throw new Error("Start visit failed");
+
+      await loadVisits();   // refresh UI
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function submitVisit(visitId) {
+    try {
+
+      const res = await apiFetch(`/api/visits/${visitId}/submit`, {
+        method: "PATCH"
+      });
+
+      if (!res.ok) throw new Error("Submit failed");
+
+      await loadVisits();
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function approveVisit(visitId) {
+    try {
+
+      const res = await apiFetch(`/api/visits/${visitId}/approve`, {
+        method: "PATCH"
+      });
+
+      if (!res.ok) throw new Error("Approve failed");
+
+      await loadVisits();
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+
+  // Handle technician updates for a visit
+  async function updateVisitTechnicians(visitId) {
+    try {
+
+      const res = await apiFetch(`/api/visits/${visitId}/technicians`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          technician_ids: visitTechs
+        })
+      });
+
+      if (!res.ok) throw new Error("Update failed");
+
+      setEditVisit(null);
+      await loadVisits();
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Separate function for rescheduling to keep it clean
+  async function rescheduleVisitDate(visitId) {
+    try {
+
+      const res = await apiFetch(`/api/visits/${visitId}/reschedule`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          scheduled_date: visitDate
+        })
+      });
+
+      if (!res.ok) throw new Error("Reschedule failed");
+
+      setRescheduleVisit(null);
+      await loadVisits();
+
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // Handle status updates (start, pause, complete, etc.)
   async function updateStatus(newStatus) {
     try {
       const token = localStorage.getItem("token");
@@ -109,6 +276,7 @@ export default function JobPage() {
     }
   }
 
+  // Handle submit for approval (technician action)
   async function submitForApproval() {
     try {
       const res = await apiFetch(`/api/jobs/${jobId}/submit-approval`, {
@@ -125,49 +293,72 @@ export default function JobPage() {
     }
   }
 
-  async function handleSaveDates() {
-    const isSingleDay = scheduleType === "single";
-    const startDateValue = dateForm.start_date;
-    const endDateValue = isSingleDay ? "" : dateForm.end_date;
+  // Handle visit cancellation
+  function openChangeTech(visit) {
+    setEditVisit(visit);
+    setVisitTechs(visit.technicians?.map(t => t.id) || []);
+    setIsEditVisitModalOpen(true);
+  }
+  // Handle visit cancellation
+  function openReschedule(visit) {
+    setRescheduleVisit(visit);
+    setVisitDate(
+      visit.scheduled_date
+        ? new Date(visit.scheduled_date).toISOString().slice(0, 10)
+        : ""
+    );
+    setIsRescheduleModalOpen(true);
+  }
 
-    if (isSingleDay) {
-      if (!startDateValue) {
-        alert("Date of service is required");
-        return;
-      }
-    } else {
-      if (!startDateValue || !endDateValue) {
-        alert("Start and end dates are required for multi-day schedules");
-        return;
-      }
-      const start = new Date(startDateValue);
-      const end = new Date(endDateValue);
-      if (end < start) {
-        alert("End date cannot be before start date");
-        return;
-      }
-    }
+  // Handle visit cancellation
+  async function cancelVisit(visitId) {
     try {
-      setSavingDates(true);
-      const res = await apiFetch(`/api/jobs/${jobId}/dates`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          start_date: startDateValue || null,
-          end_date: endDateValue || null,
-        }),
+
+      const res = await apiFetch(`/api/visits/${visitId}/cancel`, {
+        method: "PATCH"
       });
 
-      if (!res.ok) throw new Error("Date update failed");
+      if (!res.ok) throw new Error("Cancel failed");
 
-      const jobRes = await apiFetch(`/api/jobs/${jobId}`);
-      setJob(await jobRes.json());
+      await loadVisits();
+
     } catch (err) {
-      console.error("Failed to update dates", err);
-    } finally {
-      setSavingDates(false);
+      console.error(err);
     }
   }
 
+  // Handle visit creation
+  async function handleCreateVisit() {
+    try {
+      setSavingVisit(true);
+
+      const res = await apiFetch(`/api/visits/jobs/${jobId}/visits`, {
+        method: "POST",
+        body: JSON.stringify({
+          scheduled_date: visitDate,
+          technician_ids: visitTechs,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to create visit");
+
+      await res.json();
+
+      setIsVisitModalOpen(false);
+      setVisitDate("");
+      setVisitTechs([]);
+
+      await reloadHistory();
+      await loadVisits();
+
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingVisit(false);
+    }
+  }
+
+  // Handle assignment from AssignWorkOrderModal
   async function handleAssignSingle({ supervisorId, technicianIds, scope, rangeStart, rangeEnd }) {
     try {
       const res = await apiFetch(`/api/jobs/assign`, {
@@ -189,6 +380,7 @@ export default function JobPage() {
       setJob(await jobRes.json());
 
       await reloadHistory();
+      await loadVisits();
       setIsAssignOpen(false);
     } catch (err) {
       console.error("Assignment failed", err);
@@ -206,176 +398,276 @@ export default function JobPage() {
         {/* LEFT COLUMN */}
         <div className="job-left">
           <JobHeader job={job} setIsAssignOpen={canAssign ? setIsAssignOpen : null} />
-          <div className="job-schedule-card">
-            <div className="job-schedule-title">Schedule</div>
-            <div className="job-schedule-toggle">
-              <button
-                type="button"
-                className={`job-schedule-pill ${scheduleType === "single" ? "active" : ""}`}
-                onClick={() => {
-                  setScheduleType("single");
-                  setDateForm((prev) => ({ ...prev, end_date: "" }));
-                }}
-              >
-                Single Day
-              </button>
-              <button
-                type="button"
-                className={`job-schedule-pill ${scheduleType === "range" ? "active" : ""}`}
-                onClick={() => setScheduleType("range")}
-              >
-                Multi-day
-              </button>
-            </div>
 
-            {scheduleType === "single" ? (
-              <div className="job-schedule-grid">
-                <label className="job-schedule-field">
-                  <span>Date of service</span>
-                  <input
-                    type="date"
-                    value={dateForm.start_date}
-                    onChange={(e) =>
-                      setDateForm((prev) => ({ ...prev, start_date: e.target.value }))
-                    }
-                  />
-                </label>
-              </div>
-            ) : (
-              <div className="job-schedule-grid">
-                <label className="job-schedule-field">
-                  <span>Start date</span>
-                  <input
-                    type="date"
-                    value={dateForm.start_date}
-                    onChange={(e) =>
-                      setDateForm((prev) => ({ ...prev, start_date: e.target.value }))
-                    }
-                    max={dateForm.end_date || undefined}
-                  />
-                </label>
-                <label className="job-schedule-field">
-                  <span>End date</span>
-                  <input
-                    type="date"
-                    value={dateForm.end_date}
-                    onChange={(e) =>
-                      setDateForm((prev) => ({ ...prev, end_date: e.target.value }))
-                    }
-                    min={dateForm.start_date || undefined}
-                  />
-                </label>
+          {role !== "technician" && (
+            <div className="job-schedule-card">
+              <div className="job-schedule-title">Schedule</div>
+
+              {!job.start_date ? (
+                <div className="job-schedule-empty">
+                  Schedule not set
+                </div>
+              ) : job.dueDate ? (
+                <div className="job-schedule-grid">
+                  <div className="job-schedule-field">
+                    <span>Start date</span>
+                    <div className="job-schedule-value">
+                      {new Date(job.start_date).toLocaleDateString()}
+                    </div>
+                  </div>
+
+                  <div className="job-schedule-field">
+                    <span>End date</span>
+                    <div className="job-schedule-value">
+                      {new Date(job.dueDate).toLocaleDateString()}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="job-schedule-grid">
+                  <div className="job-schedule-field">
+                    <span>Date of service</span>
+                    <div className="job-schedule-value">
+                      {new Date(job.start_date).toLocaleDateString()}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>)}
+
+
+          {role !== "technician" && (
+            <div className="job-actions">
+
+              {jobstatus === "CREATED" && (
+                <div className="job-actions-info">
+                  Waiting for assignment
+                </div>
+              )}
+
+              {canStart && (
+                <button
+                  className="job-btn job-btn-start"
+                  onClick={() => updateStatus("IN_PROGRESS")}
+                >
+                  Start Job
+                </button>
+              )}
+
+              {jobstatus === "IN_PROGRESS" && !awaitingApproval && (
+                role === "technician" ? (
+                  <button
+                    className="job-btn job-btn-complete"
+                    onClick={submitForApproval}
+                  >
+                    Submit for Approval
+                  </button>
+                ) : (
+                  <div className="job-actions-row">
+                    <button
+                      className="job-btn job-btn-pause"
+                      onClick={() => updateStatus("PAUSED")}
+                    >
+                      Pause
+                    </button>
+                    <button
+                      className="job-btn job-btn-complete"
+                      onClick={() => updateStatus("COMPLETED")}
+                    >
+                      Complete
+                    </button>
+                  </div>
+                )
+              )}
+
+              {jobstatus === "PAUSED" && !awaitingApproval && (
+                role === "technician" ? (
+                  <button
+                    className="job-btn job-btn-complete"
+                    onClick={submitForApproval}
+                  >
+                    Submit for Approval
+                  </button>
+                ) : (
+                  <div className="job-actions-row">
+                    <button
+                      className="job-btn job-btn-resume"
+                      onClick={() => updateStatus("IN_PROGRESS")}
+                    >
+                      Resume
+                    </button>
+                    <button
+                      className="job-btn job-btn-complete"
+                      onClick={() => updateStatus("COMPLETED")}
+                    >
+                      Complete
+                    </button>
+                  </div>
+                )
+              )}
+
+              {awaitingApproval && (
+                role === "technician" ? (
+                  <div className="job-actions-info">
+                    Awaiting supervisor approval
+                  </div>
+                ) : (
+                  <button
+                    className="job-btn job-btn-complete"
+                    onClick={() => updateStatus("COMPLETED")}
+                  >
+                    Approve & Complete
+                  </button>
+                )
+              )}
+
+              {jobstatus === "COMPLETED" && (
+                <div className="job-actions-success">
+                  Completed
+                </div>
+              )}
+
+              {jobstatus === "CANCELED" && (
+                <div className="job-actions-cancel">
+                  Canceled
+                </div>
+              )}
+
+            </div>)}
+
+          <div className="job-visits">
+            <h3>Visits</h3>
+
+            {visibleVisits.length === 0 && (
+              <div className="job-visits-empty">
+                {role === "technician"
+                  ? "No visit scheduled for today"
+                  : "No visits scheduled"}
               </div>
             )}
-            <button
-              className="job-schedule-save"
-              onClick={handleSaveDates}
-              disabled={savingDates}
-            >
-              {savingDates ? "Saving..." : "Save Dates"}
-            </button>
+
+            {visibleVisits.map((visit) => (
+              <div key={visit.id} className="job-visit-card">
+
+                <div className="job-visit-header">
+                  <strong>Visit #{visit.visit_number}</strong>
+                  <span className={`job-visit-status ${visit.status}`}>
+                    {visit.status}
+                  </span>
+                </div>
+
+                <div className="job-visit-date">
+                  {visit.scheduled_date
+                    ? new Date(visit.scheduled_date).toLocaleDateString()
+                    : "Unscheduled"}
+                </div>
+
+
+
+
+
+
+
+
+
+
+                {["technician", "supervisor", "admin"].includes(role) && visit.status === "SCHEDULED" && (
+                  <button
+                    className="visit-start-btn"
+                    onClick={() => startVisit(visit.id)}
+                  >
+                    Start Visit
+                  </button>
+                )}
+
+                {["technician", "supervisor", "admin"].includes(role) && visit.status === "IN_PROGRESS" && (
+                  <button
+                    className="visit-submit-btn"
+                    onClick={() => submitVisit(visit.id)}
+                  >
+                    Submit for Approval
+                  </button>
+                )}
+
+                {role !== "technician" && visit.status === "AWAITING_APPROVAL" && (
+                  <button
+                    className="visit-approve-btn"
+                    onClick={() => approveVisit(visit.id)}
+                  >
+                    Approve Visit
+                  </button>
+                )}
+
+
+
+
+
+
+
+
+                {visit.technicians?.length > 0 && (
+                  <div className="job-visit-techs">
+                    {visit.technicians.map((t) => (
+                      <span key={t.id} className="job-visit-tech">
+                        {t.name}
+                      </span>
+                    ))}
+
+
+                  </div>
+
+
+                )}
+
+                <div className="job-visit-actions">
+
+                  <button
+                    className="visit-menu-trigger"
+                    onClick={() =>
+                      setOpenVisitMenu(openVisitMenu === visit.id ? null : visit.id)
+                    }
+                  >
+                    ⋯
+                  </button>
+
+                  {openVisitMenu === visit.id && (
+                    <div className="visit-menu">
+
+                      <button onClick={() => openChangeTech(visit)}>
+                        Change Tech
+                      </button>
+
+                      <button onClick={() => openReschedule(visit)}>
+                        Reschedule
+                      </button>
+
+                      <button
+                        className="danger"
+                        onClick={() => cancelVisit(visit.id)}
+                      >
+                        Cancel Visit
+                      </button>
+
+                    </div>
+                  )}
+
+                </div>
+
+              </div>
+
+            ))}
           </div>
-                  
 
-<div className="job-actions">
-
-  {jobstatus === "CREATED" && (
-    <div className="job-actions-info">
-      Waiting for assignment
-    </div>
-  )}
-
-  {canStart && (
-    <button
-      className="job-btn job-btn-start"
-      onClick={() => updateStatus("IN_PROGRESS")}
-    >
-      Start Job
-    </button>
-  )}
-
-  {jobstatus === "IN_PROGRESS" && !awaitingApproval && (
-    role === "technician" ? (
-      <button
-        className="job-btn job-btn-complete"
-        onClick={submitForApproval}
-      >
-        Submit for Approval
-      </button>
-    ) : (
-      <div className="job-actions-row">
-        <button
-          className="job-btn job-btn-pause"
-          onClick={() => updateStatus("PAUSED")}
-        >
-          Pause
-        </button>
-        <button
-          className="job-btn job-btn-complete"
-          onClick={() => updateStatus("COMPLETED")}
-        >
-          Complete
-        </button>
-      </div>
-    )
-  )}
-
-  {jobstatus === "PAUSED" && !awaitingApproval && (
-    role === "technician" ? (
-      <button
-        className="job-btn job-btn-complete"
-        onClick={submitForApproval}
-      >
-        Submit for Approval
-      </button>
-    ) : (
-      <div className="job-actions-row">
-        <button
-          className="job-btn job-btn-resume"
-          onClick={() => updateStatus("IN_PROGRESS")}
-        >
-          Resume
-        </button>
-        <button
-          className="job-btn job-btn-complete"
-          onClick={() => updateStatus("COMPLETED")}
-        >
-          Complete
-        </button>
-      </div>
-    )
-  )}
-
-  {awaitingApproval && (
-    role === "technician" ? (
-      <div className="job-actions-info">
-        Awaiting supervisor approval
-      </div>
-    ) : (
-      <button
-        className="job-btn job-btn-complete"
-        onClick={() => updateStatus("COMPLETED")}
-      >
-        Approve & Complete
-      </button>
-    )
-  )}
-
-  {jobstatus === "COMPLETED" && (
-    <div className="job-actions-success">
-      Completed
-    </div>
-  )}
-
-  {jobstatus === "CANCELED" && (
-    <div className="job-actions-cancel">
-      Canceled
-    </div>
-  )}
-
-</div>
-
-
+          {role !== "technician" && (
+            <div className="job-visits-actions">
+              <button
+                className="job-btn job-btn-primary"
+                onClick={() => setIsVisitModalOpen(true)}
+              >
+                Schedule Visit
+              </button>
+            </div>
+          )}
           {/* Add comments and files  */}
           <JobUpdateComposer
             onSubmit={async ({ message, files }) => {
@@ -439,8 +731,144 @@ export default function JobPage() {
 
 
       </div>
+      {isVisitModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+
+            <h3>Schedule Visit</h3>
+
+            <div className="visit-form-group">
+              <label>Visit Date</label>
+
+              <input
+                type="date"
+                className="visit-date-input"
+                value={visitDate}
+                onChange={(e) => setVisitDate(e.target.value)}
+              />
+            </div>
+
+            <div className="visit-form-group">
+              <label>Technicians</label>
+
+              <div className="visit-tech-list">
+                {job.team?.map((t) => (
+                  <label key={t.id} className="visit-tech-item">
+                    <input
+                      type="checkbox"
+                      checked={visitTechs.includes(t.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setVisitTechs([...visitTechs, t.id]);
+                        } else {
+                          setVisitTechs(visitTechs.filter(id => id !== t.id));
+                        }
+                      }}
+                    />
+                    <span>{t.name}</span>
+                  </label>
+                ))}
+              </div>
+
+
+
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={() => setIsVisitModalOpen(false)}>
+                Cancel
+              </button>
+
+              <button
+                disabled={savingVisit || !visitDate}
+                onClick={handleCreateVisit}
+              >
+                {savingVisit ? "Saving..." : "Create Visit"}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {editVisit && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+
+            <h3>Change Technicians</h3>
+
+            <div className="visit-tech-list">
+              {job.team?.map((t) => (
+                <label key={t.id} className="visit-tech-item">
+                  <input
+                    type="checkbox"
+                    checked={visitTechs.includes(t.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setVisitTechs([...visitTechs, t.id]);
+                      } else {
+                        setVisitTechs(visitTechs.filter(id => id !== t.id));
+                      }
+                    }}
+                  />
+                  <span>{t.name}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={() => setEditVisit(null)}>Cancel</button>
+
+              <button
+                onClick={() => updateVisitTechnicians(editVisit.id)}
+              >
+                Save
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {rescheduleVisit && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+
+            <h3>Reschedule Visit</h3>
+
+            <input
+              type="date"
+              value={visitDate}
+              onChange={(e) => setVisitDate(e.target.value)}
+            />
+
+            <div className="modal-actions">
+              <button onClick={() => setRescheduleVisit(null)}>
+                Cancel
+              </button>
+
+              <button
+                onClick={() => rescheduleVisitDate(rescheduleVisit.id)}
+              >
+                Save
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+
+
+
+
     </div>
+
+
+
   );
+
+
 
 }
 

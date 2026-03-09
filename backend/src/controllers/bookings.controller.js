@@ -106,8 +106,8 @@ async function createBooking(req, res) {
     typeof address === "string" && address.trim()
       ? address.trim()
       : typeof location === "string" && location.trim()
-      ? location.trim()
-      : null;
+        ? location.trim()
+        : null;
 
   // recurrence normalize
   if (recurrence) {
@@ -272,6 +272,34 @@ async function createBooking(req, res) {
           serviceEndDate,
         ]
       );
+
+      // Create Visit #1 for this job
+      const visitId = uuid();
+      await connection.query(
+        `INSERT INTO job_visits
+  (id, job_id, visit_number, scheduled_date, status, created_by_user_id, created_at, updated_at)
+  VALUES (?, ?, 1, ?, 'SCHEDULED', ?, NOW(), NOW())`,
+        [
+          visitId,
+          jobId,
+          serviceStartDate || null,
+          created_by_user_id,
+        ]
+      );
+
+      // attach technician if provided
+      if (technicianId) {
+        await connection.query(
+          `INSERT INTO visit_technicians
+    (id, visit_id, technician_id, created_at)
+    VALUES (?, ?, ?, NOW())`,
+          [
+            uuid(),
+            visitId,
+            technicianId
+          ]
+        );
+      }
 
       // history
       await connection.query(

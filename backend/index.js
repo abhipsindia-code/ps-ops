@@ -15,6 +15,7 @@ const authroutes = require("./src/routes/auth.routes");
 const teamRoutes = require("./src/routes/teams.routes");
 const dashboardRoutes = require("./src/routes/dashboard.routes");
 const bookingsRoutes = require('./src/routes/bookings.routes');
+const visitRoutes = require('./src/routes/visits.routes');
 
 
 
@@ -47,6 +48,7 @@ app.use("/api/teams", teamRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use(express.json());
 app.use("/api/bookings", bookingsRoutes);
+app.use("/api/visits", visitRoutes);
 
 
 

@@ -118,208 +118,192 @@ const updateRangeRecurringJobs = async (
   return result?.affectedRows || 0;
 };
 // GET /api/jobs → from MySQL
-router.get("/", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
-  try {
-    const conditions = [];
-    const params = [];
-    const scope = String(req.query.scope || "active").toLowerCase();
+router.get(
+  "/",
+  auth,
+  allowRoles("admin", "supervisor", "technician"),
+  async (req, res) => {
+    try {
 
-    // Supervisors see their jobs, technicians see jobs assigned to them
-    if (req.user.role === "supervisor") {
-      conditions.push("j.supervisor_id = ?");
-      params.push(req.user.id);
-    }
+      const conditions = [];
+      const params = [];
 
-    // technicians (later) → jobs where they are in team JSON
-    if (req.user.role === "technician") {
-      conditions.push(`(
-        JSON_CONTAINS(j.team, CAST(? AS JSON))
-        OR JSON_CONTAINS(j.team, JSON_QUOTE(?))
-      )`);
-      params.push(req.user.id, String(req.user.id));
-    }
-
-    if (scope === "summary") {
-      conditions.push(`(
-        j.status = 'COMPLETED'
-        OR (
-          j.approval_status = 'PENDING'
-          AND j.status IN ('IN_PROGRESS', 'PAUSED')
-        )
-      )`);
-    } else if (scope !== "all") {
-      // Active jobs only: Pending, Not Started, In Progress, Paused
-      conditions.push(`(
-        j.status IN ('NOT_STARTED', 'IN_PROGRESS', 'PAUSED')
-      )
-      AND NOT (
-        j.approval_status = 'PENDING'
-        AND j.status IN ('IN_PROGRESS', 'PAUSED')
-      )
-      AND NOT (
-        j.status = 'NOT_STARTED'
-        AND j.start_date IS NOT NULL
-        AND j.start_date < NOW()
-        AND (
-          YEAR(j.start_date) < YEAR(NOW())
-          OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
-        )
-      )`);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const [rows] = await pool.query(`
-      SELECT
-        j.*,
-
-        CASE
-          WHEN j.approval_status = 'PENDING'
-            AND j.status IN ('IN_PROGRESS', 'PAUSED')
-            THEN 'AWAITING_APPROVAL'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            AND (
-              YEAR(j.start_date) < YEAR(NOW())
-              OR (YEAR(j.start_date) = YEAR(NOW()) AND MONTH(j.start_date) < MONTH(NOW()))
-            )
-            THEN 'LOST'
-          WHEN j.status = 'NOT_STARTED'
-            AND j.start_date IS NOT NULL
-            AND j.start_date < NOW()
-            THEN 'PENDING'
-          ELSE j.status
-        END AS display_status,
-
-        -- Supervisor
-        u.name AS supervisor_name,
-
-        -- Requested by contact
-        c.id   AS contact_id,
-        c.name AS contact_name,
-        c.phone AS contact_phone,
-        c.email AS contact_email,
-
-        -- Company (if corporate / RWA)
-        co.id   AS company_id,
-        co.code AS company_code,
-        co.type AS company_type,
-        co.name AS company_name,
-        co.site AS company_site
-
-
-      FROM jobs j
-      LEFT JOIN users u
-        ON j.supervisor_id = u.id
-
-      LEFT JOIN contacts c
-        ON j.requested_by_contact_id = c.id
-
-      LEFT JOIN companies co
-        ON j.company_id = co.id
-
-      ${where}
-
-      ORDER BY j.created_at DESC
-    `, params);
-    const normalizedJobs = rows.map(job => {
-      let teamIds = [];
-
-      if (job.team) {
-        try {
-          teamIds = Array.isArray(job.team)
-            ? job.team
-            : JSON.parse(job.team);
-        } catch {
-          teamIds = [];
-        }
+      // supervisor → only their jobs
+      if (req.user.role === "supervisor") {
+        conditions.push("j.supervisor_id = ?");
+        params.push(req.user.id);
       }
 
-      teamIds = teamIds.map(id => Number(id)).filter(Boolean);
-
-      return {
-        id: job.id,
-        code: job.code,
-        booking_id: job.booking_id,
-
-        service_type: job.service_type,
-        title: job.sub_service,
-        status: job.status,
-        display_status: job.display_status,
-        approval_status: job.approval_status,
-        dueDate: job.due_date,
-        notes: job.notes,
-        start_date: job.start_date,
-        address: job.address,
-        companyname: job.company_name,
-        site: job.company_site,
-
-        company_id: job.company_id, // authoritative job company
-
-        supervisor: job.supervisor_id
-          ? {
-            id: job.supervisor_id,
-            name: job.supervisor_name,
-          }
-          : null,
-
-        requestedBy: job.contact_id
-          ? {
-            id: job.contact_id,
-            name: job.contact_name,
-            phone: job.contact_phone,
-            email: job.contact_email,
-
-            company: job.company_id
-              ? {
-                id: job.company_id,
-                code: job.company_code,
-                type: job.company_type,
-              }
-              : null,
-          }
-          : null,
-
-        teamIds,
-        history: [],
-        attachments: [],
-      };
-    });
-
-    const allTeamIds = Array.from(
-      new Set(
-        normalizedJobs.flatMap(job => job.teamIds || [])
+      // technician → jobs where they are in team JSON
+// technician → jobs where technician has a relevant visit
+if (req.user.role === "technician") {
+  conditions.push(`
+    EXISTS (
+      SELECT 1
+      FROM job_visits v
+      JOIN visit_technicians vt ON vt.visit_id = v.id
+      WHERE v.job_id = j.id
+      AND vt.technician_id = ?
+      AND (
+            (DATE(v.scheduled_date) = CURDATE() AND v.status = 'SCHEDULED')
+         OR v.status = 'IN_PROGRESS'
+         OR v.status = 'AWAITING_APPROVAL'
       )
-    );
+    )
+  `);
 
-    let teamUserMap = new Map();
-    if (allTeamIds.length > 0) {
-      const placeholders = allTeamIds.map(() => "?").join(",");
-      const [users] = await pool.query(
-        `SELECT id, name FROM users WHERE id IN (${placeholders})`,
-        allTeamIds
+  params.push(req.user.id);
+}
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+      const [rows] = await pool.query(
+        `
+        SELECT
+          j.id,
+          j.code,
+          j.booking_id,
+          j.service_type,
+          j.sub_service,
+          j.status,
+          j.approval_status,
+          j.start_date,
+          j.due_date,
+          j.notes,
+          j.address,
+          j.created_at,
+          j.supervisor_id,
+          j.team,
+
+          -- Supervisor
+          u.name AS supervisor_name,
+
+          -- Contact
+          c.id   AS contact_id,
+          c.name AS contact_name,
+          c.phone AS contact_phone,
+          c.email AS contact_email,
+
+          -- Company
+          co.id   AS company_id,
+          co.code AS company_code,
+          co.name AS company_name,
+          co.type AS company_type,
+          co.site AS company_site
+
+        FROM jobs j
+
+        LEFT JOIN users u
+          ON j.supervisor_id = u.id
+
+        LEFT JOIN contacts c
+          ON j.requested_by_contact_id = c.id
+
+        LEFT JOIN companies co
+          ON j.company_id = co.id
+
+        ${where}
+
+        ORDER BY j.created_at DESC
+        `,
+        params
       );
-      teamUserMap = new Map(users.map(u => [Number(u.id), u]));
-    }
 
-    const finalJobs = normalizedJobs.map(job => {
-      const team = (job.teamIds || []).map(id => {
-        const user = teamUserMap.get(Number(id));
-        return user ? { id: user.id, name: user.name } : { id };
+      const jobs = rows.map((row) => {
+        let teamIds = [];
+
+        if (row.team) {
+          try {
+            teamIds = Array.isArray(row.team)
+              ? row.team
+              : JSON.parse(row.team);
+          } catch {
+            teamIds = [];
+          }
+        }
+
+        return {
+          id: row.id,
+          code: row.code,
+          booking_id: row.booking_id,
+
+          service_type: row.service_type,
+          title: row.sub_service,
+
+          status: row.status,
+          approval_status: row.approval_status,
+
+          start_date: row.start_date,
+          dueDate: row.due_date,
+          notes: row.notes,
+          address: row.address,
+
+          company_id: row.company_id,
+          companyname: row.company_name,
+          site: row.company_site,
+
+          supervisor: row.supervisor_id
+            ? {
+                id: row.supervisor_id,
+                name: row.supervisor_name,
+              }
+            : null,
+
+          requestedBy: row.contact_id
+            ? {
+                id: row.contact_id,
+                name: row.contact_name,
+                phone: row.contact_phone,
+                email: row.contact_email,
+                company: row.company_name,
+              }
+            : null,
+
+          teamIds,
+          team: [],
+          history: [],
+          attachments: [],
+        };
       });
 
-      const { teamIds, ...rest } = job;
-      return { ...rest, team };
-    });
+      // resolve team users
+      const allTeamIds = Array.from(
+        new Set(jobs.flatMap((j) => j.teamIds))
+      );
 
-    res.json(finalJobs);
+      let teamUserMap = new Map();
 
-  } catch (err) {
-    console.error("Error fetching jobs:", err);
-    res.status(500).json({ error: "Failed to fetch jobs" });
+      if (allTeamIds.length) {
+        const placeholders = allTeamIds.map(() => "?").join(",");
+
+        const [users] = await pool.query(
+          `SELECT id, name FROM users WHERE id IN (${placeholders})`,
+          allTeamIds
+        );
+
+        teamUserMap = new Map(users.map((u) => [Number(u.id), u]));
+      }
+
+      const finalJobs = jobs.map((job) => {
+        const team = job.teamIds.map((id) => {
+          const user = teamUserMap.get(Number(id));
+          return user ? { id: user.id, name: user.name } : { id };
+        });
+
+        const { teamIds, ...rest } = job;
+
+        return {
+          ...rest,
+          team,
+        };
+      });
+
+      res.json(finalJobs);
+    } catch (err) {
+      console.error("Error fetching jobs:", err);
+      res.status(500).json({ error: "Failed to fetch jobs" });
+    }
   }
-});
+);
 // GET single job by ID
 router.get("/:jobId", auth, allowRoles("admin", "supervisor", "technician"), async (req, res) => {
   const { jobId } = req.params;

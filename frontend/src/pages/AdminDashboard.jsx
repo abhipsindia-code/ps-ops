@@ -35,7 +35,7 @@ export default function AdminDashboard() {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [viewMode, setViewMode] = useState("active");
+  
   const defaultFilters = {
     status: "",
     startDate: "",
@@ -48,33 +48,31 @@ export default function AdminDashboard() {
   const [supervisors, setSupervisors] = useState([]);
   const [technicians, setTechnicians] = useState([]);
 
-  const fetchJobs = async (scope = viewMode) => {
-    setLoading(true);
-    setError(null);
+const fetchJobs = async () => {
+  setLoading(true);
+  setError(null);
 
-    try {
-      const query = scope === "summary" ? "?scope=summary" : "";
-      const res = await apiFetch(`/api/jobs${query}`);
-      if (!res.ok) throw new Error("Failed to fetch jobs");
-      const data = await res.json();
-      setJobs(data);
-    } catch (err) {
-      console.error(err);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  try {
+    const res = await apiFetch(`/api/jobs`);
+    if (!res.ok) throw new Error("Failed to fetch jobs");
+    const data = await res.json();
+    setJobs(data);
+  } catch (err) {
+    console.error(err);
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
+useEffect(() => {
+  fetchJobs();
+}, []);
 
-  useEffect(() => {
-    fetchJobs();
-  }, [viewMode]);
-
-  useEffect(() => {
-    setSelectedJobIds([]);
-    setExpandedJobId(null);
-  }, [viewMode]);
+useEffect(() => {
+  setSelectedJobIds([]);
+  setExpandedJobId(null);
+}, [jobs]);
 
   useEffect(() => {
     let isMounted = true;
@@ -119,16 +117,16 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!setActionsConfig) return undefined;
+  if (!setActionsConfig) return undefined;
 
-    setActionsConfig({
-      onCreate: () => setIsCreateOpen(true),
-      onAssign: () => setIsAssignOpen(true),
-      disableAssign: viewMode === "summary" || selectedJobIds.length === 0,
-    });
+  setActionsConfig({
+    onCreate: () => setIsCreateOpen(true),
+    onAssign: () => setIsAssignOpen(true),
+    disableAssign: selectedJobIds.length === 0,
+  });
 
-    return () => setActionsConfig(null);
-  }, [setActionsConfig, selectedJobIds.length, viewMode]);
+  return () => setActionsConfig(null);
+}, [setActionsConfig, selectedJobIds.length]);
 
   const supervisorOptions = useMemo(() => {
     if (supervisors.length > 0) {
@@ -190,7 +188,7 @@ export default function AdminDashboard() {
       technician_id: form.technician_id ?? null,
     };
 
-    const res = await apiFetch("/api/jobs", {
+    const res = await apiFetch("/api/bookings", {
       method: "POST",
       body: JSON.stringify(payload),
     });
@@ -278,22 +276,7 @@ export default function AdminDashboard() {
 
         {/* job list  */}
         <div>
-          <div style={viewToggleRowStyle}>
-            <button
-              type="button"
-              onClick={() => setViewMode("active")}
-              style={viewToggleButtonStyle(viewMode === "active")}
-            >
-              Active Jobs
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("summary")}
-              style={viewToggleButtonStyle(viewMode === "summary")}
-            >
-              Summary Jobs
-            </button>
-          </div>
+
 
           <JobFilters
             filters={filters}
@@ -337,7 +320,7 @@ export default function AdminDashboard() {
           </button>
 
           <button
-            disabled={viewMode === "summary" || selectedJobIds.length === 0}
+            disabled={selectedJobIds.length === 0}
             onClick={() => setIsAssignOpen(true)}
           >
             Assign Work Order
@@ -392,18 +375,5 @@ export default function AdminDashboard() {
   )
 }
 
-const viewToggleRowStyle = {
-  display: "flex",
-  gap: "8px",
-  marginBottom: "12px",
-};
 
-const viewToggleButtonStyle = (active) => ({
-  padding: "8px 12px",
-  borderRadius: "999px",
-  border: active ? "1px solid #2563eb" : "1px solid #d1d5db",
-  background: active ? "#eff6ff" : "#ffffff",
-  color: "#111827",
-  fontWeight: 600,
-  cursor: "pointer",
-});
+

@@ -77,7 +77,7 @@ export default function JobHeader({ job, setIsAssignOpen }) {
       {/* RIGHT */}
       <div className="job-header-right">
 
-        <div className="team-details">
+        {role !== "technician" && (<div className="team-details">
           <strong>Supervisor:</strong>{" "}
           {canAssign && setIsAssignOpen ? (
             <button
@@ -89,10 +89,10 @@ export default function JobHeader({ job, setIsAssignOpen }) {
           ) : (
             <span>{supervisor?.name ?? "Unassigned"}</span>
           )}
-        </div>
+        </div>)}
 
         {/* TEAM */}
-        {Array.isArray(team) && team.length > 0 && (
+        {role !== "technician" && Array.isArray(team) && team.length > 0 && (
           <div className="team-line">
             <strong>Team:</strong>{" "}
             {team.map(member => member.name).join(", ")}

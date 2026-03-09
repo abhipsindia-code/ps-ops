@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 
+const role = localStorage.getItem("role");
+
 export default function JobCard({
   job,
   updateStatus,
@@ -84,7 +86,8 @@ export default function JobCard({
       </div>
 
       {/* actions */}
-      <div className="job-card-actions">
+      {role !== "technician" && (
+        <div className="job-card-actions">
 
         {awaitingApproval && (
           <button className="btn-complete" disabled>
@@ -110,7 +113,7 @@ export default function JobCard({
           </button>
         )}
 
-      </div>
+      </div>)}
     </div>
   );
 }

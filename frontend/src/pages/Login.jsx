@@ -130,6 +130,12 @@ export default function Login() {
             >
               Login
             </button>
+            <div style={{ marginTop: "12px", fontSize: "14px" }}>
+              Don't have an account?{" "}
+              <a href="/signup" style={{ color: "#2563eb", fontWeight: 500 }}>
+                Sign up
+              </a>
+            </div>
 
             <p
               style={{ cursor: "pointer", marginTop: 10 }}
@@ -146,7 +152,7 @@ export default function Login() {
             <h2>Reset Password</h2>
 
             <input
-            type="username"
+              type="username"
               placeholder="Enter your email"
               value={email}
               onChange={e => setEmail(e.target.value)}

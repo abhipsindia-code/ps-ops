@@ -2,6 +2,7 @@ import "./JobRow.css";
 
 const isCorporateJob = (code) => /^[A-Z]{2,}[\s-]\d+/.test(code);
 const getInitials = (code) => code.split(/[\s-]/)[0];
+const role = localStorage.getItem("role");
 
 export default function JobRow({
   job,
@@ -57,60 +58,62 @@ export default function JobRow({
   const scheduleDate = job.dueDate || job.start_date;
 
   return (
-  <div
-    className={`job-row ${isExpanded ? "expanded" : ""}`}
-    onClick={onToggleExpand}
-  >
+    <div
+      className={`job-row ${isExpanded ? "expanded" : ""}`}
+      onClick={onToggleExpand}
+    >
 
-    {/* 1 — Checkbox */}
-    <input
-      type="checkbox"
-      checked={isSelected}
-      onChange={onToggleSelect}
-      className="job-checkbox"
-      onClick={(e) => e.stopPropagation()}
-    />
+      {/* 1 — Checkbox */}
+      <input
+        type="checkbox"
+        checked={isSelected}
+        onChange={onToggleSelect}
+        className="job-checkbox"
+        onClick={(e) => e.stopPropagation()}
+      />
 
-    {/* 2 — Identity (company + code) */}
-    <div className="job-identity">
-      <div className="job-companyname">
-        {title}
-      </div>
+      {/* 2 — Identity (company + code) */}
+      <div className="job-identity">
+        <div className="job-companyname">
+          {title}
+        </div>
 
-      <div className="job-identity-text">
-        <div className="job-code">{job.site}</div>
-        <div className="job-customer-type">
-          {isCorporateJob(job.code)
-            ? "Corporate Work Order"
-            : "Individual Customer"}
+        <div className="job-identity-text">
+          <div className="job-code">{job.site}</div>
+          <div className="job-customer-type">
+            {isCorporateJob(job.code)
+              ? "Corporate Work Order"
+              : "Individual Customer"}
+          </div>
         </div>
       </div>
-    </div>
 
-    {/* 3 — Service */}
-    <div className="job-title">
-      {service}   
-    </div>
-
-    {/* 4 — Supervisor */}
-    <div className="job-supervisor-block">
-      <div className="job-supervisor-label">Supervisor</div>
-      <div className="job-supervisor-name">
-        {job.supervisor ? job.supervisor.name : "Unassigned"}
-      </div>
-    </div>
-
-    {/* 5 — Status + Due (RIGHT PANEL) */}
-    <div className="job-right">
-      <div className={`job-status ${displayStatus}`}>
-        {displayStatus.replace("_", " ")}
+      {/* 3 — Service */}
+      <div className="job-title">
+        {service}
       </div>
 
-      <div className="job-due">
-        {formatDueDate(scheduleDate)}
+      {/* 4 — Supervisor */}
+      <div className="job-supervisor-block">
+        <div className="job-supervisor-label">Supervisor</div>
+        <div className="job-supervisor-name">
+          {job.supervisor ? job.supervisor.name : "Unassigned"}
+        </div>
       </div>
-    </div>
 
-  </div>
-);
+      {/* 5 — Status + Due (RIGHT PANEL) */}
+      {role !== "technician" && (
+        <div className="job-right">
+          <div className={`job-status ${displayStatus}`}>
+            {displayStatus.replace("_", " ")}
+          </div>
+
+          <div className="job-due">
+            {formatDueDate(scheduleDate)}
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
 }

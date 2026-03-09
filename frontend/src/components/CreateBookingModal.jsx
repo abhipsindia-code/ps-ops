@@ -16,6 +16,7 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
   const [assignedTechnicianName, setAssignedTechnicianName] = useState("");
   const role = localStorage.getItem("role");
   const loggedInUserId = Number(localStorage.getItem("userId"));
+  const [showContactResults, setShowContactResults] = useState(false);
 
   const [form, setForm] = useState({
     contactId: "",
@@ -489,47 +490,81 @@ export default function CreateBookingModal({ isOpen, onClose, onCreate, supervis
           <div style={section}>
             <h4>Requested By</h4>
 
-            <input
-              type="text"
-              value={contactSearch}
-              onChange={(e) => setContactSearch(e.target.value)}
-              placeholder="Search contacts by name, phone, email, or company"
-              style={{ ...input, marginBottom: "10px" }}
-            />
+            <div style={{ position: "relative" }}>
 
-            <select
-              value={form.contactId}
-              onChange={e =>
-                setForm(prev => ({
-                  ...prev,
-                  contactId: e.target.value,
-                }))
-              }
-              style={input}
+              <input
+                type="text"
+                value={contactSearch}
+                onFocus={() => setShowContactResults(true)}
+                onChange={(e) => {
+                  setContactSearch(e.target.value);
+                  setShowContactResults(true);
+                }}
+                placeholder="Search contacts by name, phone, email, or company"
+                style={input}
+              />
+              {showContactResults && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    background: "#fff",
+                    border: "1px solid #d1d5db",
+                    borderRadius: "8px",
+                    maxHeight: "220px",
+                    overflowY: "auto",
+                    marginTop: "4px",
+                    zIndex: 50
+                  }}
+                >
+                  {loadingContacts ? (
+                    <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                      Loading contacts…
+                    </div>
+                  ) : filteredContacts.length === 0 ? (
+                    <div style={{ padding: "10px", fontSize: "13px", color: "#6b7280" }}>
+                      No contacts found
+                    </div>
+                  ) : (
+                    filteredContacts.map(c => {
+                      const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
+                      const phoneLabel = c.phone || c.contact_phone || "";
+
+                      return (
+                        <div
+                          key={c.id}
+                          style={{
+                            padding: "10px",
+                            cursor: "pointer",
+                            borderBottom: "1px solid #f3f4f6",
+                            fontSize: "13px"
+                          }}
+                          onClick={() => {
+                            setForm(prev => ({ ...prev, contactId: c.id }));
+                            setContactSearch(`${c.name} - ${c.phone || c.contact_phone || ""}`);
+                            setShowContactResults(false);
+                          }}
+                          
+                        >
+                          <strong>{c.name}</strong>
+                          {phoneLabel ? ` • ${phoneLabel}` : ""}
+                          {companyLabel ? ` • ${companyLabel}` : ""}
+                          {c.company_code ? ` (${c.company_code})` : ""}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+            </div>
+
+            <button
+              style={{ marginTop: "10px" }}
+              onClick={() => setIsContactModalOpen(true)}
             >
-              <option value="">
-                {loadingContacts ? "Loading contacts…" : "Select requester"}
-              </option>
-
-              {filteredContacts.map(c => {
-                const companyLabel = [c.company_name, c.company_site].filter(Boolean).join(" - ");
-                const phoneLabel = c.phone || c.contact_phone || "";
-                return (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {phoneLabel ? ` - ${phoneLabel}` : ""}
-                    {companyLabel || c.company_code ? " - " : ""}
-                    {companyLabel}
-                    {c.company_code ? ` (${c.company_code})` : ""}
-                  </option>
-                );
-              })}
-            </select>
-
-
-
-
-            <button onClick={() => setIsContactModalOpen(true)}>
               + Create Contact
             </button>
           </div>
